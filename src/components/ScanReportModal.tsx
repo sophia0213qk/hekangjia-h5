@@ -80,11 +80,25 @@ export const ScanReportModal: React.FC<ScanReportModalProps> = ({
             title: data.title || customName || '化验报告',
             date: data.date || new Date().toISOString().split('T')[0],
             lab: data.lab || '',
-            items: items.map((it) => ({
-              name: it.name,
-              value: it.value,
-              status: it.status === 'abnormal' ? '异常' : it.status || '正常',
-            })),
+            sourceFileUrl: res.source_file_url || '',
+            items: items.map((it) => {
+              const statusRaw = (it.status || '').toLowerCase();
+              let status = '正常';
+              if (statusRaw === 'high' || statusRaw === '偏高') status = '偏高';
+              else if (statusRaw === 'low' || statusRaw === '偏低') status = '偏低';
+              else if (statusRaw === 'abnormal' || statusRaw === '异常') status = '异常';
+              else if (it.status && !['normal', '正常'].includes(statusRaw)) status = it.status;
+              const reference = (it.reference || '').trim();
+              return {
+                name: it.name,
+                value: it.value,
+                reference:
+                  reference && !['参考区间内', '正常', '异常', '偏高', '偏低'].includes(reference)
+                    ? reference
+                    : '',
+                status,
+              };
+            }),
             confidence: `${Math.round((res.confidence || 0) * 1000) / 10}%`,
           });
         }
@@ -111,10 +125,10 @@ export const ScanReportModal: React.FC<ScanReportModalProps> = ({
           date: new Date().toISOString().split('T')[0],
           lab: '四川大学华西医院检验科',
           items: [
-            { name: '空腹血糖 (FBG)', value: '5.62 mmol/L', status: '正常' },
-            { name: '总胆固醇 (TC)', value: '4.21 mmol/L', status: '达标' },
-            { name: '低密度脂蛋白 (LDL-C)', value: '1.98 mmol/L', status: '优质' },
-            { name: '血肌酐 (Cr)', value: '78 μmol/L', status: '正常' },
+            { name: '空腹血糖 (FBG)', value: '5.62 mmol/L', reference: '3.90 ~ 6.10', status: '正常' },
+            { name: '总胆固醇 (TC)', value: '4.21 mmol/L', reference: '2.80 ~ 5.18', status: '达标' },
+            { name: '低密度脂蛋白 (LDL-C)', value: '1.98 mmol/L', reference: '< 2.60', status: '优质' },
+            { name: '血肌酐 (Cr)', value: '78 μmol/L', reference: '53 ~ 106', status: '正常' },
           ],
           confidence: '98.8%',
         });
@@ -376,12 +390,21 @@ export const ScanReportModal: React.FC<ScanReportModalProps> = ({
                 {recognizedResult.items.map((it: any, idx: number) => (
                   <div
                     key={idx}
-                    className="flex justify-between items-center text-[11px] p-2 bg-white rounded-lg border border-[#00685d]/10"
+                    className="flex justify-between items-center text-[11px] p-2 bg-white rounded-lg border border-[#00685d]/10 gap-2"
                   >
-                    <span className="font-medium text-[#131e1a]">{it.name}</span>
-                    <div className="flex items-center gap-2">
+                    <span className="font-medium text-[#131e1a] min-w-0 truncate">{it.name}</span>
+                    <div className="flex items-center gap-2 shrink-0">
                       <span className="font-bold text-[#00685d]">{it.value}</span>
-                      <span className="text-[10px] px-1.5 rounded bg-[#9af3e3]/50 text-[#005047] font-semibold">
+                      {it.reference ? (
+                        <span className="text-[10px] text-[#6f7975]">参:{it.reference}</span>
+                      ) : null}
+                      <span
+                        className={`text-[10px] px-1.5 rounded font-semibold ${
+                          it.status === '正常' || it.status === '达标' || it.status === '优质'
+                            ? 'bg-[#9af3e3]/50 text-[#005047]'
+                            : 'bg-[#ffdad2] text-[#a7391e]'
+                        }`}
+                      >
                         {it.status}
                       </span>
                     </div>

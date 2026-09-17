@@ -13,6 +13,7 @@ from app.schemas.common import (
     TokenResponse,
     UserOut,
 )
+from app.services.seed import seed_demo_family
 from app.services.sms import create_and_send_sms_code, verify_sms_code
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -20,6 +21,8 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 def _ensure_family(db: Session, user: models.User) -> models.User:
     if user.family_id:
+        seed_demo_family(db, user)
+        db.refresh(user)
         return user
     family = models.Family(name=f"{user.display_name or '我'}的家庭", owner_user_id=user.id)
     db.add(family)
@@ -27,7 +30,7 @@ def _ensure_family(db: Session, user: models.User) -> models.User:
     user.family_id = family.id
     if not user.display_name:
         user.display_name = f"用户{user.phone[-4:]}"
-    # Default self member
+    # Default self member (will be replaced by demo seed if family is sparse)
     self_member = models.Member(
         family_id=family.id,
         name=user.display_name,
@@ -46,6 +49,8 @@ def _ensure_family(db: Session, user: models.User) -> models.User:
     )
     db.add(self_member)
     db.commit()
+    db.refresh(user)
+    seed_demo_family(db, user)
     db.refresh(user)
     return user
 

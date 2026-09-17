@@ -200,6 +200,7 @@ class LabReportOut(BaseModel):
     statusTag: str
     statusType: str
     metrics: list[dict[str, Any]]
+    sourceFileUrl: str = ""
 
 
 class ScheduleCreate(BaseModel):
@@ -262,3 +263,4 @@ class ScanResult(BaseModel):
     data: dict[str, Any]
     confidence: float = 0.0
     raw_text: str = ""
+    source_file_url: str = ""

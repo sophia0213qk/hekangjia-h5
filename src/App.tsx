@@ -1,11 +1,4 @@
-import React, { useState, useEffect } from 'react';
-import {
-  INITIAL_MEMBERS,
-  INITIAL_MEDICATIONS,
-  INITIAL_RECORDS,
-  INITIAL_LAB_REPORTS,
-  INITIAL_SCHEDULES,
-} from './data/mockData';
+import React, { useState, useEffect, useCallback } from 'react';
 import { FamilyMember, Medication, MedicalRecord, LabReport, MedicalSchedule } from './types';
 import { Header } from './components/Header';
 import { BottomNav } from './components/BottomNav';
@@ -31,39 +24,105 @@ import { LoginPage } from './components/LoginPage';
 import {
   AuthUser,
   api,
+  clearLegacyBusinessCache,
   clearSession,
   getStoredUser,
   getToken,
 } from './api/client';
 
-const INITIAL_HEALTH_NOTIFICATIONS: HealthNotification[] = [
-  {
-    id: 'notif-1',
-    title: '父亲晨间降压药待服提醒',
-    time: '08:00 (已过20分钟)',
-    desc: '监测到早晨静息心率略有波动，请及时提醒父亲温开水送服络活喜。',
-    type: 'warning',
-    actionLabel: '一键呼叫提醒',
-    actionType: 'remind-father',
-    isRead: false,
-  },
-  {
-    id: 'notif-2',
-    title: '华西医院门诊复查随访日程',
-    time: '5月22日 周四 09:30',
-    desc: '心内科复查前需空腹8小时，请提前准备过往心电图报告单。',
-    type: 'info',
-    actionLabel: '查看随访日程',
-    actionType: 'view-schedule',
-    isRead: false,
-  },
-];
+function emptyVitals(): FamilyMember['vitals'] {
+  return {
+    bloodPressure: {
+      systolic: 120,
+      diastolic: 80,
+      changeText: '暂无',
+      status: '待录入',
+      history: [],
+      measuredAt: '暂无',
+    },
+  };
+}
+
+function normalizeMember(m: FamilyMember): FamilyMember {
+  return {
+    ...m,
+    allergies: m.allergies || [],
+    chronicConditions: m.chronicConditions || [],
+    vitals: m.vitals?.bloodPressure ? m.vitals : { ...emptyVitals(), ...(m.vitals || {}) },
+  };
+}
 
 export default function App() {
   const [authUser, setAuthUser] = useState<AuthUser | null>(() =>
     getToken() ? getStoredUser() : null
   );
   const [authChecking, setAuthChecking] = useState(() => !!getToken());
+  const [dataLoading, setDataLoading] = useState(false);
+  const [dataError, setDataError] = useState('');
+
+  const [members, setMembers] = useState<FamilyMember[]>([]);
+  const [medications, setMedications] = useState<Medication[]>([]);
+  const [records, setRecords] = useState<MedicalRecord[]>([]);
+  const [labReports, setLabReports] = useState<LabReport[]>([]);
+  const [schedules, setSchedules] = useState<MedicalSchedule[]>([]);
+  const [notifications, setNotifications] = useState<HealthNotification[]>([]);
+
+  const [currentTab, setCurrentTab] = useState<string>('overview');
+  const [selectedMemberId, setSelectedMemberId] = useState<string>('all');
+  const [activeProfileMemberId, setActiveProfileMemberId] = useState<string>('');
+
+  const [isRecordVitalsOpen, setIsRecordVitalsOpen] = useState(false);
+  const [isScanOpen, setIsScanOpen] = useState(false);
+  const [scanInitialMemberId, setScanInitialMemberId] = useState<string>('');
+  const [scanInitialType, setScanInitialType] = useState<'medicine' | 'lab'>('lab');
+  const [isExportBriefOpen, setIsExportBriefOpen] = useState(false);
+  const [isAddMemberOpen, setIsAddMemberOpen] = useState(false);
+  const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
+  const [isAddRecordOpen, setIsAddRecordOpen] = useState(false);
+  const [isScheduleModalOpen, setIsScheduleModalOpen] = useState(false);
+  const [selectedScheduleDetailId, setSelectedScheduleDetailId] = useState<string | undefined>();
+  const [selectedLabReport, setSelectedLabReport] = useState<LabReport | null>(null);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  const showToast = (msg: string) => {
+    setToastMessage(msg);
+    setTimeout(() => setToastMessage(null), 3000);
+  };
+
+  const loadAllData = useCallback(async () => {
+    setDataLoading(true);
+    setDataError('');
+    clearLegacyBusinessCache();
+    try {
+      const [mems, meds, recs, labs, schs, notifs] = await Promise.all([
+        api.getMembers(),
+        api.getMedications(),
+        api.getRecords(),
+        api.getLabReports(),
+        api.getSchedules(),
+        api.getNotifications(),
+      ]);
+      const normalized = mems.map(normalizeMember);
+      setMembers(normalized);
+      setMedications(meds);
+      setRecords(recs);
+      setLabReports(labs);
+      setSchedules(schs);
+      setNotifications(notifs);
+      if (normalized.length > 0) {
+        setActiveProfileMemberId((prev) =>
+          prev && normalized.some((m) => m.id === prev) ? prev : normalized[0].id
+        );
+        setScanInitialMemberId((prev) =>
+          prev && normalized.some((m) => m.id === prev) ? prev : normalized[0].id
+        );
+      }
+    } catch (e) {
+      setDataError(e instanceof Error ? e.message : '加载失败');
+    } finally {
+      setDataLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
     const token = getToken();
@@ -73,7 +132,9 @@ export default function App() {
     }
     api
       .me()
-      .then((user) => setAuthUser(user))
+      .then((user) => {
+        setAuthUser(user);
+      })
       .catch(() => {
         clearSession();
         setAuthUser(null);
@@ -81,97 +142,30 @@ export default function App() {
       .finally(() => setAuthChecking(false));
   }, []);
 
-  // Persistent or Local State
-  const [members, setMembers] = useState<FamilyMember[]>(() => {
-    const saved = localStorage.getItem('hk_members');
-    return saved ? JSON.parse(saved) : INITIAL_MEMBERS;
-  });
-
-  const [medications, setMedications] = useState<Medication[]>(() => {
-    const saved = localStorage.getItem('hk_medications');
-    return saved ? JSON.parse(saved) : INITIAL_MEDICATIONS;
-  });
-
-  const [records, setRecords] = useState<MedicalRecord[]>(() => {
-    const saved = localStorage.getItem('hk_records');
-    return saved ? JSON.parse(saved) : INITIAL_RECORDS;
-  });
-
-  const [labReports, setLabReports] = useState<LabReport[]>(() => {
-    const saved = localStorage.getItem('hk_lab_reports');
-    return saved ? JSON.parse(saved) : INITIAL_LAB_REPORTS;
-  });
-
-  const [schedules, setSchedules] = useState<MedicalSchedule[]>(() => {
-    const saved = localStorage.getItem('hk_schedules');
-    return saved ? JSON.parse(saved) : INITIAL_SCHEDULES;
-  });
-
-  const [notifications, setNotifications] = useState<HealthNotification[]>(() => {
-    const saved = localStorage.getItem('hk_notifications');
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved);
-        return parsed.filter(
-          (n: HealthNotification) =>
-            !n.title.includes('药箱') && n.actionType !== 'manage-stock'
-        );
-      } catch {
-        return INITIAL_HEALTH_NOTIFICATIONS;
-      }
+  useEffect(() => {
+    if (authUser) {
+      loadAllData();
+    } else {
+      setMembers([]);
+      setMedications([]);
+      setRecords([]);
+      setLabReports([]);
+      setSchedules([]);
+      setNotifications([]);
     }
-    return INITIAL_HEALTH_NOTIFICATIONS;
-  });
-
-  // Sync to localStorage
-  useEffect(() => {
-    localStorage.setItem('hk_members', JSON.stringify(members));
-  }, [members]);
-
-  useEffect(() => {
-    localStorage.setItem('hk_medications', JSON.stringify(medications));
-  }, [medications]);
-
-  useEffect(() => {
-    localStorage.setItem('hk_records', JSON.stringify(records));
-  }, [records]);
-
-  useEffect(() => {
-    localStorage.setItem('hk_lab_reports', JSON.stringify(labReports));
-  }, [labReports]);
-
-  useEffect(() => {
-    localStorage.setItem('hk_schedules', JSON.stringify(schedules));
-  }, [schedules]);
-
-  useEffect(() => {
-    localStorage.setItem('hk_notifications', JSON.stringify(notifications));
-  }, [notifications]);
+  }, [authUser, loadAllData]);
 
   const unreadNotifCount = notifications.filter((n) => !n.isRead).length;
 
-  const handleMarkAllNotificationsRead = () => {
-    setNotifications((prev) => prev.map((n) => ({ ...n, isRead: true })));
-    showToast('所有健康通知已标为已读');
+  const handleMarkAllNotificationsRead = async () => {
+    try {
+      await api.markAllNotificationsRead();
+      setNotifications((prev) => prev.map((n) => ({ ...n, isRead: true })));
+      showToast('所有健康通知已标为已读');
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : '操作失败');
+    }
   };
-
-  // Navigation State
-  const [currentTab, setCurrentTab] = useState<string>('overview');
-  const [selectedMemberId, setSelectedMemberId] = useState<string>('all');
-  const [activeProfileMemberId, setActiveProfileMemberId] = useState<string>('father');
-
-  // Modal States
-  const [isRecordVitalsOpen, setIsRecordVitalsOpen] = useState(false);
-  const [isScanOpen, setIsScanOpen] = useState(false);
-  const [scanInitialMemberId, setScanInitialMemberId] = useState<string>('father');
-  const [scanInitialType, setScanInitialType] = useState<'medicine' | 'lab'>('lab');
-  const [isExportBriefOpen, setIsExportBriefOpen] = useState(false);
-  const [isAddMemberOpen, setIsAddMemberOpen] = useState(false);
-  const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
-  const [isAddRecordOpen, setIsAddRecordOpen] = useState(false);
-  const [isScheduleModalOpen, setIsScheduleModalOpen] = useState(false);
-  const [selectedScheduleDetailId, setSelectedScheduleDetailId] = useState<string | undefined>(undefined);
-  const [selectedLabReport, setSelectedLabReport] = useState<LabReport | null>(null);
 
   const handleOpenUploadReport = (memberId?: string) => {
     setScanInitialType('lab');
@@ -179,221 +173,327 @@ export default function App() {
       setScanInitialMemberId(memberId);
     } else if (activeProfileMemberId) {
       setScanInitialMemberId(activeProfileMemberId);
-    } else {
-      setScanInitialMemberId('father');
+    } else if (members[0]) {
+      setScanInitialMemberId(members[0].id);
     }
     setIsScanOpen(true);
   };
 
-  // Toast feedback state
-  const [toastMessage, setToastMessage] = useState<string | null>(null);
-
-  const showToast = (msg: string) => {
-    setToastMessage(msg);
-    setTimeout(() => setToastMessage(null), 3000);
+  const handleToggleCompleteSchedule = async (id: string) => {
+    const current = schedules.find((s) => s.id === id);
+    if (!current) return;
+    try {
+      const updated = await api.updateSchedule(id, { isCompleted: !current.isCompleted });
+      setSchedules((prev) => prev.map((s) => (s.id === id ? updated : s)));
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : '更新失败');
+    }
   };
 
-  // Schedule Handlers
-  const handleToggleCompleteSchedule = (id: string) => {
-    setSchedules((prev) =>
-      prev.map((s) => (s.id === id ? { ...s, isCompleted: !s.isCompleted } : s))
-    );
+  const handleToggleReminderSchedule = async (id: string) => {
+    const current = schedules.find((s) => s.id === id);
+    if (!current) return;
+    try {
+      const updated = await api.updateSchedule(id, { reminderSet: !current.reminderSet });
+      setSchedules((prev) => prev.map((s) => (s.id === id ? updated : s)));
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : '更新失败');
+    }
   };
 
-  const handleToggleReminderSchedule = (id: string) => {
-    setSchedules((prev) =>
-      prev.map((s) => (s.id === id ? { ...s, reminderSet: !s.reminderSet } : s))
-    );
+  const handleDeleteSchedule = async (id: string) => {
+    try {
+      await api.deleteSchedule(id);
+      setSchedules((prev) => prev.filter((s) => s.id !== id));
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : '删除失败');
+    }
   };
 
-  const handleDeleteSchedule = (id: string) => {
-    setSchedules((prev) => prev.filter((s) => s.id !== id));
+  const handleAddSchedule = async (scheduleData: Omit<MedicalSchedule, 'id'>) => {
+    const timeMatch = scheduleData.time?.match(/(\d{1,2}):(\d{2})/);
+    const time = timeMatch
+      ? `${timeMatch[1].padStart(2, '0')}:${timeMatch[2]}`
+      : '09:00';
+    try {
+      const created = await api.createSchedule({
+        memberId: scheduleData.memberId,
+        title: scheduleData.title,
+        type: scheduleData.type || 'clinic',
+        dateIso: scheduleData.dateIso || new Date().toISOString().split('T')[0],
+        time,
+        location: scheduleData.location,
+        department: scheduleData.department,
+        doctor: scheduleData.doctor,
+        tags: scheduleData.tags,
+        notes: scheduleData.notes,
+        themeColor: scheduleData.themeColor,
+        reminderSet: scheduleData.reminderSet ?? true,
+      });
+      setSchedules((prev) => [created, ...prev]);
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : '创建失败');
+      throw e;
+    }
   };
 
-  const handleAddSchedule = (scheduleData: Omit<MedicalSchedule, 'id'>) => {
-    const newSch: MedicalSchedule = {
-      ...scheduleData,
-      id: `sch-${Date.now()}`,
-    };
-    setSchedules((prev) => [newSch, ...prev]);
+  const handleToggleMedTaken = async (id: string) => {
+    try {
+      const updated = await api.takeMedication(id);
+      setMedications((prev) => prev.map((m) => (m.id === id ? updated : m)));
+      if (updated.isTakenToday) {
+        showToast(`已标为已服：${updated.name}`);
+      }
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : '操作失败');
+    }
   };
 
-  // Handlers
-  const handleToggleMedTaken = (id: string) => {
-    setMedications((prev) =>
-      prev.map((m) => {
-        if (m.id === id) {
-          const nextTaken = !m.isTakenToday;
-          const nowTime = new Date().toLocaleTimeString('zh-CN', {
-            hour: '2-digit',
-            minute: '2-digit',
-          });
-          if (nextTaken) {
-            showToast(`已标为已服：${m.name}`);
-          }
-          return {
-            ...m,
-            isTakenToday: nextTaken,
-            takenAt: nextTaken ? nowTime : undefined,
-          };
-        }
-        return m;
-      })
-    );
+  const handleSaveMedication = async (newMed: Partial<Medication>) => {
+    try {
+      const memberId = newMed.memberId || members[0]?.id;
+      if (!memberId) {
+        showToast('请先添加家庭成员');
+        return;
+      }
+      const created = await api.createMedication({
+        memberId,
+        name: newMed.name || '新药品',
+        genericName: newMed.genericName || '',
+        dosage: newMed.dosage || '1片 / 次',
+        dosageForm: newMed.dosageForm || '片剂 (片)',
+        frequency: newMed.frequency || '每日 1 次',
+        timeSlot: newMed.timeSlot || '08:00',
+        timeLabel: newMed.timeLabel || '晨起餐后 30 分钟',
+        mealTiming: newMed.mealTiming || '餐后半小时',
+        tags: newMed.tags || ['家庭常备'],
+        notes: newMed.notes || '',
+        stockCurrent: newMed.stockCurrent || 30,
+        stockWarning: newMed.stockWarning || 7,
+        scheduleMode: newMed.scheduleMode || 'continuous',
+        startDate: newMed.startDate || new Date().toISOString().split('T')[0],
+        duration: newMed.duration || '长期遵医嘱',
+      });
+      setMedications((prev) => [created, ...prev]);
+      showToast(`新药品已保存并开启提醒：${created.name}`);
+      setCurrentTab('overview');
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : '保存失败');
+    }
   };
 
-  const handleSaveMedication = (newMed: Partial<Medication>) => {
-    const fullMed: Medication = {
-      id: newMed.id || `med-${Date.now()}`,
-      memberId: newMed.memberId || 'father',
-      memberName: newMed.memberName || '父亲 · 陈建国',
-      name: newMed.name || '新药品',
-      genericName: newMed.genericName,
-      dosage: newMed.dosage || '1片 / 次',
-      dosageForm: newMed.dosageForm || '片剂 (片)',
-      frequency: newMed.frequency || '每日 1 次',
-      timeSlot: newMed.timeSlot || '08:00',
-      timeLabel: newMed.timeLabel || '晨起餐后 30 分钟',
-      mealTiming: newMed.mealTiming || '餐后半小时',
-      tags: newMed.tags || ['家庭常备'],
-      notes: newMed.notes || '',
-      stockCurrent: newMed.stockCurrent || 30,
-      stockWarning: newMed.stockWarning || 7,
-      remainingDays: newMed.remainingDays || 30,
-      isTakenToday: false,
-      scheduleMode: newMed.scheduleMode || 'continuous',
-      startDate: newMed.startDate || new Date().toISOString().split('T')[0],
-      duration: newMed.duration || '长期遵医嘱',
-    };
-
-    setMedications((prev) => [fullMed, ...prev]);
-    showToast(`新药品已保存并开启提醒：${fullMed.name}`);
-    setCurrentTab('overview');
-  };
-
-  const handleSaveVitals = (
+  const handleSaveVitals = async (
     memberId: string,
     vitalType: 'bp' | 'glucose' | 'temp' | 'heartRate',
-    data: any
+    data: Record<string, unknown>
   ) => {
-    setMembers((prev) =>
-      prev.map((m) => {
-        if (m.id === memberId) {
-          const updatedVitals = { ...m.vitals };
-          if (vitalType === 'bp') {
-            const currentHist = updatedVitals.bloodPressure.history || [126, 128, 124];
-            updatedVitals.bloodPressure = {
-              ...updatedVitals.bloodPressure,
-              systolic: data.systolic,
-              diastolic: data.diastolic,
-              changeText: '自测更新',
-              measuredAt: '刚刚',
-              history: [...currentHist.slice(-6), data.systolic],
-            };
-          } else if (vitalType === 'glucose') {
-            updatedVitals.bloodSugar = {
-              value: data.value,
-              unit: 'mmol/L',
-              status: '达标 · 自测记录',
-              timing: data.timing,
-            };
-          } else if (vitalType === 'temp') {
-            updatedVitals.temperature = {
-              value: data.value,
-              unit: '℃',
-              status: '正常稳定',
-              timeAgo: '刚刚',
-            };
-          } else if (vitalType === 'heartRate') {
-            updatedVitals.heartRate = {
-              value: data.value,
-              unit: '次/分',
-              status: '节律规整',
-              rhythm: '窦性',
-            };
-          }
-          return { ...m, vitals: updatedVitals };
-        }
-        return m;
-      })
-    );
-    showToast('体征数据已成功记录并校准');
+    try {
+      const updated = await api.recordVitals(memberId, { type: vitalType, data });
+      setMembers((prev) =>
+        prev.map((m) => (m.id === memberId ? normalizeMember(updated) : m))
+      );
+      showToast('体征数据已成功记录并校准');
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : '录入失败');
+    }
   };
 
-  const handleAddMember = (newMem: FamilyMember) => {
-    setMembers((prev) => [...prev, newMem]);
-    showToast(`已建立【${newMem.name}】的家庭健康档案`);
+  const handleAddMember = async (newMem: FamilyMember) => {
+    try {
+      const created = await api.createMember({
+        name: newMem.name,
+        nickname: newMem.nickname,
+        relation: newMem.relation,
+        age: newMem.age,
+        avatar: newMem.avatar,
+        blood_type: newMem.bloodType,
+        height: newMem.height,
+        weight: newMem.weight,
+        chronic_conditions: newMem.chronicConditions,
+        allergies: newMem.allergies || [],
+        status_text: newMem.statusText,
+        status_type: newMem.statusType,
+      });
+      setMembers((prev) => [...prev, normalizeMember(created)]);
+      showToast(`已建立【${created.name}】的家庭健康档案`);
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : '添加失败');
+    }
   };
 
-  const handleUpdateMember = (updatedMem: FamilyMember) => {
-    setMembers((prev) => prev.map((m) => (m.id === updatedMem.id ? updatedMem : m)));
-    showToast(`已成功保存【${updatedMem.name}】的健康档案`);
+  const handleUpdateMember = async (updatedMem: FamilyMember) => {
+    try {
+      const saved = await api.updateMember(updatedMem.id, {
+        name: updatedMem.name,
+        nickname: updatedMem.nickname,
+        relation: updatedMem.relation,
+        age: updatedMem.age,
+        avatar: updatedMem.avatar,
+        blood_type: updatedMem.bloodType,
+        height: updatedMem.height,
+        weight: updatedMem.weight,
+        chronic_conditions: updatedMem.chronicConditions,
+        allergies: updatedMem.allergies || [],
+        status_text: updatedMem.statusText,
+        status_type: updatedMem.statusType,
+      });
+      setMembers((prev) =>
+        prev.map((m) => (m.id === saved.id ? normalizeMember({ ...saved, vitals: updatedMem.vitals || saved.vitals }) : m))
+      );
+      showToast(`已成功保存【${saved.name}】的健康档案`);
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : '保存失败');
+    }
   };
 
-  const handleUpdateMedication = (updatedMed: Medication) => {
-    setMedications((prev) => prev.map((med) => (med.id === updatedMed.id ? updatedMed : med)));
-    showToast(`已更新【${updatedMed.name}】的用药与提醒设置`);
+  const handleUpdateMedication = async (updatedMed: Medication) => {
+    try {
+      const saved = await api.updateMedication(updatedMed.id, {
+        name: updatedMed.name,
+        genericName: updatedMed.genericName || '',
+        dosage: updatedMed.dosage,
+        dosageForm: updatedMed.dosageForm,
+        frequency: updatedMed.frequency,
+        timeSlot: updatedMed.timeSlot,
+        timeLabel: updatedMed.timeLabel,
+        mealTiming: updatedMed.mealTiming,
+        tags: updatedMed.tags,
+        notes: updatedMed.notes,
+        stockCurrent: updatedMed.stockCurrent,
+        stockWarning: updatedMed.stockWarning,
+        scheduleMode: updatedMed.scheduleMode,
+        startDate: updatedMed.startDate,
+        duration: updatedMed.duration,
+      });
+      setMedications((prev) => prev.map((med) => (med.id === saved.id ? saved : med)));
+      showToast(`已更新【${saved.name}】的用药与提醒设置`);
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : '更新失败');
+    }
   };
 
-  const handleDeleteMedication = (medId: string) => {
-    setMedications((prev) => prev.filter((m) => m.id !== medId));
-    showToast('已停用并移出该药物');
+  const handleDeleteMedication = async (medId: string) => {
+    try {
+      await api.deleteMedication(medId);
+      setMedications((prev) => prev.filter((m) => m.id !== medId));
+      showToast('已停用并移出该药物');
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : '删除失败');
+    }
   };
 
-  const handleAddRecord = (newRec: MedicalRecord) => {
-    setRecords((prev) => [newRec, ...prev]);
-    showToast(`已录入：${newRec.hospital} 复诊病历`);
+  const handleAddRecord = async (newRec: MedicalRecord) => {
+    try {
+      const created = await api.createRecord({
+        memberId: newRec.memberId,
+        hospital: newRec.hospital,
+        department: newRec.department,
+        date: newRec.date,
+        doctor: newRec.doctor,
+        status: newRec.status,
+        complaint: newRec.complaint,
+        diagnosis: newRec.diagnosis,
+        orders: newRec.orders,
+      });
+      setRecords((prev) => [created, ...prev]);
+      showToast(`已录入：${created.hospital} 复诊病历`);
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : '录入失败');
+      throw e;
+    }
   };
 
-  const handleApplyScannedMedicine = (medData: any) => {
+  const handleApplyScannedMedicine = (medData: { title?: string }) => {
     setCurrentTab('medication');
-    showToast(`已提取：${medData.title}`);
+    showToast(`已提取：${medData.title || '药品信息'}`);
   };
 
-  const handleApplyScannedReport = (repData: any) => {
+  const handleApplyScannedReport = async (repData: Record<string, unknown>) => {
     const targetMember =
       members.find((m) => m.id === repData.memberId) ||
       members.find((m) => m.id === activeProfileMemberId) ||
       members[0];
+    if (!targetMember) {
+      showToast('请先选择成员');
+      return;
+    }
+    try {
+      const items = (repData.items as Array<Record<string, string>>) || [];
+      const metrics = items.map((it) => {
+        const status = (it.status || '').trim();
+        let statusLabel = '正常';
+        if (['high', '偏高'].includes(status)) statusLabel = '偏高';
+        else if (['low', '偏低'].includes(status)) statusLabel = '偏低';
+        else if (['abnormal', '异常'].includes(status)) statusLabel = '异常';
+        else if (['达标', '优质', '阴性', '正常', 'normal'].includes(status)) statusLabel = status === 'normal' ? '正常' : status;
+        else if (status) statusLabel = status;
 
-    const newReport: LabReport = {
-      id: `lab-${Date.now()}`,
-      memberId: targetMember.id,
-      title: repData.title || '化验检验报告单',
-      date: repData.date || new Date().toISOString().split('T')[0],
-      lab: repData.lab || '四川大学华西医院检验科',
-      statusTag: repData.statusTag || '指标正常',
-      statusType: repData.statusType || 'success',
-      metrics: (repData.items || []).map((it: any) => ({
-        name: it.name,
-        value: it.value,
-        reference: '参考区间内',
-        isNormal: it.status === '正常' || it.status === '达标' || it.status === '优质',
-      })),
-    };
-    setLabReports((prev) => [newReport, ...prev]);
-    showToast(`化验单已归档至【${targetMember.nickname} · ${targetMember.name}】健康档案`);
+        const reference = (it.reference || '').trim();
+        const badRef = new Set(['参考区间内', '正常', '异常', '偏高', '偏低', statusLabel]);
+        return {
+          name: it.name,
+          value: it.value,
+          reference: reference && !badRef.has(reference) ? reference : '—',
+          isNormal: ['正常', '达标', '优质', '阴性'].includes(statusLabel),
+          statusLabel,
+        };
+      });
+      const hasAbnormal = metrics.some((m) => !m.isNormal);
+      const created = await api.createLabReport({
+        memberId: targetMember.id,
+        title: (repData.title as string) || '化验检验报告单',
+        date: (repData.date as string) || new Date().toISOString().split('T')[0],
+        lab: (repData.lab as string) || '检验科',
+        statusTag: (repData.statusTag as string) || (hasAbnormal ? '存在异常指标' : '指标正常'),
+        statusType: (repData.statusType as string) || (hasAbnormal ? 'warning' : 'success'),
+        sourceFileUrl:
+          (repData.sourceFileUrl as string) ||
+          (repData.source_file_url as string) ||
+          '',
+        metrics,
+      });
+      setLabReports((prev) => [created, ...prev]);
+      setSelectedLabReport(created);
+      showToast(`化验单已归档至【${targetMember.nickname} · ${targetMember.name}】健康档案`);
+      if (!created.sourceFileUrl) {
+        showToast('提示：本次未保存原图，导出报告原单将不可用');
+      }
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : '归档失败');
+    }
   };
 
-  // Active member for profile view
+  const handleRemindFather = async () => {
+    try {
+      await api.sendReminder();
+      const notifs = await api.getNotifications();
+      setNotifications(notifs);
+      showToast('已向父亲健康屏及微信发送晨服提示');
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : '提醒失败');
+    }
+  };
+
   const activeProfileMember =
     members.find((m) => m.id === activeProfileMemberId) || members[0];
 
-  // Active member for overview filter
   const activeOverviewMember =
     selectedMemberId === 'all'
       ? null
       : members.find((m) => m.id === selectedMemberId) || null;
 
-  // Filtered meds for overview
   const displayedMedications =
     selectedMemberId === 'all'
       ? medications
       : medications.filter((m) => m.memberId === selectedMemberId);
 
   const pendingMedCount = medications.filter((m) => !m.isTakenToday).length;
-
-  const displayName = authUser?.display_name || '林婉';
+  const displayName = authUser?.display_name || '用户';
+  const todayLabel = new Date().toLocaleDateString('zh-CN', {
+    month: 'long',
+    day: 'numeric',
+    weekday: 'long',
+  });
 
   if (authChecking) {
     return (
@@ -405,22 +505,48 @@ export default function App() {
   }
 
   if (!authUser) {
-    return <LoginPage onLoginSuccess={(user) => setAuthUser(user)} />;
+    return (
+      <LoginPage
+        onLoginSuccess={(user) => {
+          setAuthUser(user);
+        }}
+      />
+    );
+  }
+
+  if (dataLoading && members.length === 0) {
+    return (
+      <div className="min-h-dvh flex flex-col items-center justify-center bg-[#f0fcf5] gap-3">
+        <div className="w-10 h-10 rounded-full border-2 border-[#00685d]/20 border-t-[#00685d] animate-spin" />
+        <p className="text-[13px] text-[#6f7975] font-medium">正在同步家庭健康数据…</p>
+      </div>
+    );
+  }
+
+  if (dataError && members.length === 0) {
+    return (
+      <div className="min-h-dvh flex flex-col items-center justify-center bg-[#f0fcf5] gap-3 px-6">
+        <p className="text-[14px] text-[#a7391e] text-center">{dataError}</p>
+        <button
+          type="button"
+          onClick={() => loadAllData()}
+          className="px-4 py-2 rounded-xl bg-[#00685d] text-white text-[13px] font-bold"
+        >
+          重新加载
+        </button>
+      </div>
+    );
   }
 
   return (
     <div className="min-h-screen bg-[#f0fcf5] text-[#131e1a] font-['Plus_Jakarta_Sans','Inter',sans-serif]">
-      {/* Toast Notification Banner */}
       {toastMessage && (
         <div className="fixed top-5 left-1/2 -translate-x-1/2 z-50 bg-[#131e1a] text-white px-4 py-2.5 rounded-full text-[13px] font-semibold shadow-xl flex items-center gap-2 animate-fade-in border border-white/20">
-          <span className="material-symbols-outlined text-[18px] text-[#9af3e3]">
-            check_circle
-          </span>
+          <span className="material-symbols-outlined text-[18px] text-[#9af3e3]">check_circle</span>
           <span>{toastMessage}</span>
         </div>
       )}
 
-      {/* Top Header */}
       {currentTab !== 'medication' && currentTab !== 'health-profile' && (
         <Header
           currentTab={currentTab}
@@ -435,65 +561,48 @@ export default function App() {
         />
       )}
 
-      {/* MAIN VIEW ROUTING */}
       {currentTab === 'overview' && (
         <main className="max-w-2xl mx-auto pt-16 pb-28 px-4 space-y-4">
-          {/* 1. Atmospheric Greeting & Status Badge */}
           <section className="space-y-1.5 pt-2">
             <div className="flex items-center justify-between">
               <span className="text-[12px] font-bold text-[#00685d] bg-[#e5f1ea] px-3 py-1 rounded-full flex items-center gap-1.5 shadow-xs">
                 <span className="inline-block w-2 h-2 rounded-full bg-[#00685d] animate-pulse"></span>
-                5月18日 · 星期日
+                {todayLabel}
               </span>
               <span className="text-[12px] text-[#6f7975] flex items-center gap-1">
-                <span className="material-symbols-outlined text-[16px] text-[#00685d]">
-                  eco
-                </span>
+                <span className="material-symbols-outlined text-[16px] text-[#00685d]">eco</span>
                 全家状态良好
               </span>
             </div>
-
             <div>
               <h1 className="text-[26px] font-extrabold text-[#131e1a] tracking-tight font-['Plus_Jakarta_Sans']">
                 早安，{displayName}
               </h1>
             </div>
-
             <p className="text-[14px] text-[#3e4946]">
               为家人注满关怀，今天有{' '}
-              <span className="text-[#a7391e] font-bold">{pendingMedCount} 项</span>{' '}
-              健康待办需跟进。
+              <span className="text-[#a7391e] font-bold">{pendingMedCount} 项</span> 健康待办需跟进。
             </p>
           </section>
 
-          {/* 2. Family Member Switcher Carousel */}
           <MemberSwitcher
             members={members}
             selectedMemberId={selectedMemberId}
             onSelectMember={(id) => {
               setSelectedMemberId(id);
-              if (id !== 'all') {
-                setActiveProfileMemberId(id);
-              }
+              if (id !== 'all') setActiveProfileMemberId(id);
             }}
             onAddMember={() => setIsAddMemberOpen(true)}
           />
 
-          {/* 3. Urgent Domestic Care Banner */}
-          <CareReminderBanner
-            onRemindFather={() =>
-              showToast('已向父亲健康屏及微信发送晨服提示')
-            }
-          />
+          <CareReminderBanner onRemindFather={handleRemindFather} />
 
-          {/* 4. Today's Medication Checklist */}
           <MedicationChecklist
             medications={displayedMedications}
             onToggleTaken={handleToggleMedTaken}
             onAddNewMed={() => setCurrentTab('medication')}
           />
 
-          {/* 5. Key Family Vitals Snapshot Cards */}
           <VitalsGrid
             members={members}
             onOpenDetails={(memberId) => {
@@ -503,10 +612,8 @@ export default function App() {
             onRecordVitals={() => setIsRecordVitalsOpen(true)}
           />
 
-          {/* 6. Lifestyle Atmosphere Vignette */}
           <LifestyleVignette />
 
-          {/* 7. Upcoming Medical Events & Vaccination */}
           <UpcomingEvents
             schedules={schedules}
             onOpenScheduleDetail={(sch) => {
@@ -519,26 +626,21 @@ export default function App() {
             }}
           />
 
-          {/* 8. Quick Action Floating Bar */}
           <QuickActionDrawer
             onRecordVitals={() => setIsRecordVitalsOpen(true)}
             onAddMedication={() => setCurrentTab('medication')}
             onScanReport={() => setIsScanOpen(true)}
           />
 
-          {/* Gentle Footer Affirmation */}
           <div className="text-center py-4">
             <span className="text-[12px] text-[#6f7975] flex items-center justify-center gap-1.5">
-              <span className="material-symbols-outlined text-[#00685d] text-[16px]">
-                nest_eco_leaf
-              </span>
+              <span className="material-symbols-outlined text-[#00685d] text-[16px]">nest_eco_leaf</span>
               禾康家 · 守护三代人的温润生活
             </span>
           </div>
         </main>
       )}
 
-      {/* VIEW: ADD MEDICATION (Mockup 2) */}
       {currentTab === 'medication' && (
         <AddMedicationView
           members={members}
@@ -546,14 +648,13 @@ export default function App() {
           onSave={handleSaveMedication}
           onOpenScanCamera={() => {
             setScanInitialType('medicine');
-            setScanInitialMemberId(activeProfileMemberId);
+            setScanInitialMemberId(activeProfileMemberId || members[0]?.id || '');
             setIsScanOpen(true);
           }}
         />
       )}
 
-      {/* VIEW: MEMBER HEALTH PROFILE (Mockup 3) */}
-      {currentTab === 'health-profile' && (
+      {currentTab === 'health-profile' && activeProfileMember && (
         <MemberProfileView
           member={activeProfileMember}
           allMembers={members}
@@ -580,7 +681,6 @@ export default function App() {
         />
       )}
 
-      {/* VIEW: MEDICAL RECORDS & LAB REPORTS */}
       {currentTab === 'records' && (
         <div>
           <Header
@@ -607,7 +707,6 @@ export default function App() {
         </div>
       )}
 
-      {/* Floating Bottom Navigation */}
       {currentTab !== 'medication' && (
         <BottomNav
           currentTab={currentTab}
@@ -618,12 +717,11 @@ export default function App() {
         />
       )}
 
-      {/* MODALS */}
       <RecordVitalsModal
         isOpen={isRecordVitalsOpen}
         onClose={() => setIsRecordVitalsOpen(false)}
         members={members}
-        initialMemberId={activeProfileMemberId}
+        initialMemberId={activeProfileMemberId || members[0]?.id}
         onSaveVitals={handleSaveVitals}
       />
 
@@ -631,19 +729,21 @@ export default function App() {
         isOpen={isScanOpen}
         onClose={() => setIsScanOpen(false)}
         members={members}
-        initialMemberId={scanInitialMemberId}
+        initialMemberId={scanInitialMemberId || members[0]?.id}
         initialScanType={scanInitialType}
         onApplyMedicine={handleApplyScannedMedicine}
         onApplyReport={handleApplyScannedReport}
       />
 
-      <ExportBriefModal
-        isOpen={isExportBriefOpen}
-        onClose={() => setIsExportBriefOpen(false)}
-        member={activeProfileMember}
-        medications={medications}
-        records={records}
-      />
+      {activeProfileMember && (
+        <ExportBriefModal
+          isOpen={isExportBriefOpen}
+          onClose={() => setIsExportBriefOpen(false)}
+          member={activeProfileMember}
+          medications={medications}
+          records={records}
+        />
+      )}
 
       <AddMemberModal
         isOpen={isAddMemberOpen}
@@ -656,14 +756,19 @@ export default function App() {
         onClose={() => setIsNotificationsOpen(false)}
         notifications={notifications}
         onMarkAllRead={handleMarkAllNotificationsRead}
-        onActionClick={(actionType, notifId) => {
+        onActionClick={async (actionType, notifId) => {
           if (notifId) {
-            setNotifications((prev) =>
-              prev.map((n) => (n.id === notifId ? { ...n, isRead: true } : n))
-            );
+            try {
+              await api.markNotificationRead(notifId);
+              setNotifications((prev) =>
+                prev.map((n) => (n.id === notifId ? { ...n, isRead: true } : n))
+              );
+            } catch {
+              /* ignore */
+            }
           }
           if (actionType === 'remind-father') {
-            showToast('已向父亲健康屏发送即时提醒');
+            await handleRemindFather();
           } else if (actionType === 'view-schedule') {
             setIsNotificationsOpen(false);
             setIsScheduleModalOpen(true);
@@ -675,6 +780,7 @@ export default function App() {
         isOpen={!!selectedLabReport}
         onClose={() => setSelectedLabReport(null)}
         report={selectedLabReport}
+        onShowToast={showToast}
       />
 
       <AddRecordModal

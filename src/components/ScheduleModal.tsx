@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { FamilyMember, MedicalSchedule } from '../types';
 
 interface ScheduleModalProps {
@@ -9,10 +9,12 @@ interface ScheduleModalProps {
   onToggleComplete: (id: string) => void;
   onToggleReminder: (id: string) => void;
   onDeleteSchedule: (id: string) => void;
-  onAddSchedule: (schedule: Omit<MedicalSchedule, 'id'>) => void;
+  onAddSchedule: (schedule: Omit<MedicalSchedule, 'id'>) => void | Promise<void>;
   initialSelectedId?: string;
   onShowToast: (msg: string) => void;
 }
+
+const todayIso = () => new Date().toISOString().slice(0, 10);
 
 export const ScheduleModal: React.FC<ScheduleModalProps> = ({
   isOpen,
@@ -32,12 +34,14 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
   const [selectedScheduleId, setSelectedScheduleId] = useState<string | null>(
     initialSelectedId || null
   );
+  const [isSaving, setIsSaving] = useState(false);
+  const addFormRef = useRef<HTMLDivElement>(null);
 
   // New Schedule Form State
-  const [newMemberId, setNewMemberId] = useState(members[0]?.id || 'father');
+  const [newMemberId, setNewMemberId] = useState('');
   const [newTitle, setNewTitle] = useState('');
   const [newType, setNewType] = useState<'clinic' | 'vaccine' | 'checkup' | 'followup'>('clinic');
-  const [newDate, setNewDate] = useState('2025-06-25');
+  const [newDate, setNewDate] = useState(todayIso());
   const [newTime, setNewTime] = useState('09:30');
   const [newHospital, setNewHospital] = useState('');
   const [newDepartment, setNewDepartment] = useState('');
@@ -48,6 +52,35 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
     '携带医保卡与既往病历',
   ]);
   const [customTagInput, setCustomTagInput] = useState('');
+
+  useEffect(() => {
+    if (!isOpen) return;
+    setSelectedScheduleId(initialSelectedId || null);
+    setIsAddingNew(false);
+    setIsSaving(false);
+    setNewDate(todayIso());
+    if (members[0]?.id) setNewMemberId(members[0].id);
+    // only re-init when modal opens / deep-link selection changes
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, initialSelectedId]);
+
+  useEffect(() => {
+    if (!newMemberId && members[0]?.id) {
+      setNewMemberId(members[0].id);
+    }
+  }, [members, newMemberId]);
+
+  useEffect(() => {
+    if (isAddingNew) {
+      addFormRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  }, [isAddingNew]);
+
+  const openAddForm = () => {
+    if (members[0]?.id) setNewMemberId(members[0].id);
+    setSelectedScheduleId(null);
+    setIsAddingNew(true);
+  };
 
   if (!isOpen) return null;
 
@@ -78,10 +111,14 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
     }
   };
 
-  const handleCreateSubmit = (e: React.FormEvent) => {
+  const handleCreateSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newTitle.trim()) {
       onShowToast('请填写日程事项标题');
+      return;
+    }
+    if (!newMemberId || !members.some((m) => m.id === newMemberId)) {
+      onShowToast('请选择就诊成员');
       return;
     }
     const mem = members.find((m) => m.id === newMemberId);
@@ -112,16 +149,21 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
       reminderSet: true,
     };
 
-    onAddSchedule(newScheduleData);
-    setIsAddingNew(false);
-    onShowToast(`已为 ${mem?.name || '家人'} 成功添加就医日程！`);
-
-    // Reset fields
-    setNewTitle('');
-    setNewHospital('');
-    setNewDepartment('');
-    setNewDoctor('');
-    setNewNotes('');
+    setIsSaving(true);
+    try {
+      await onAddSchedule(newScheduleData);
+      setIsAddingNew(false);
+      onShowToast(`已为 ${mem?.name || '家人'} 成功添加就医日程！`);
+      setNewTitle('');
+      setNewHospital('');
+      setNewDepartment('');
+      setNewDoctor('');
+      setNewNotes('');
+    } catch {
+      // App 层已 toast
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   // Filtered schedules
@@ -159,13 +201,13 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
     >
       <div className="bg-white rounded-3xl w-full max-w-xl shadow-2xl border border-[#00685d]/15 max-h-[92vh] flex flex-col overflow-hidden my-auto">
         {/* Top Header */}
-        <div className="px-5 py-4 border-b border-[#00685d]/10 flex items-center justify-between bg-linear-to-r from-[#f0fcf5] to-white shrink-0">
-          <div className="flex items-center gap-2.5">
-            <div className="w-10 h-10 rounded-2xl bg-[#00685d]/10 text-[#00685d] flex items-center justify-center">
+        <div className="px-5 py-4 border-b border-[#00685d]/10 flex items-start justify-between gap-3 bg-linear-to-r from-[#f0fcf5] to-white shrink-0">
+          <div className="flex items-center gap-2.5 min-w-0 flex-1">
+            <div className="w-10 h-10 rounded-2xl bg-[#00685d]/10 text-[#00685d] flex items-center justify-center shrink-0">
               <span className="material-symbols-outlined text-[24px]">calendar_month</span>
             </div>
-            <div>
-              <div className="flex items-center gap-2">
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
                 <h2 className="text-[18px] font-bold text-[#131e1a] font-['Plus_Jakarta_Sans']">
                   家庭就医与随访日程
                 </h2>
@@ -179,10 +221,11 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
             </div>
           </div>
 
-          <div className="flex items-center gap-1.5">
+          <div className="flex items-center gap-1.5 shrink-0">
             <button
               id="schedule-add-btn"
-              onClick={() => setIsAddingNew(true)}
+              type="button"
+              onClick={openAddForm}
               className="flex items-center gap-1 text-[13px] font-semibold bg-[#00685d] text-white px-3 py-1.5 rounded-full hover:bg-[#005249] transition shadow-xs cursor-pointer active:scale-95"
             >
               <span className="material-symbols-outlined text-[16px]">add</span>
@@ -190,6 +233,7 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
             </button>
             <button
               id="schedule-close-btn"
+              type="button"
               onClick={onClose}
               className="w-8 h-8 rounded-full flex items-center justify-center text-[#6f7975] hover:bg-[#f0fcf5] hover:text-[#131e1a] transition"
               aria-label="关闭"
@@ -275,7 +319,10 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
         <div className="flex-1 overflow-y-auto p-5 space-y-5">
           {/* Create New Schedule Accordion / Form */}
           {isAddingNew && (
-            <div className="bg-[#f0fcf5] border-2 border-[#00685d]/30 rounded-2xl p-4 shadow-sm animate-fadeIn">
+            <div
+              ref={addFormRef}
+              className="bg-[#f0fcf5] border-2 border-[#00685d]/30 rounded-2xl p-4 shadow-sm animate-fadeIn"
+            >
               <div className="flex items-center justify-between pb-3 border-b border-[#00685d]/10">
                 <div className="flex items-center gap-2">
                   <span className="material-symbols-outlined text-[#00685d] text-[20px]">
@@ -284,6 +331,7 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
                   <h3 className="text-[15px] font-bold text-[#131e1a]">添加新的就医随访安排</h3>
                 </div>
                 <button
+                  type="button"
                   onClick={() => setIsAddingNew(false)}
                   className="text-[12px] text-[#6f7975] hover:text-[#131e1a]"
                 >
@@ -484,9 +532,10 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
                   </button>
                   <button
                     type="submit"
-                    className="px-5 py-2 rounded-xl text-[13px] font-semibold bg-[#00685d] text-white shadow-sm hover:bg-[#005249] transition active:scale-95"
+                    disabled={isSaving || members.length === 0}
+                    className="px-5 py-2 rounded-xl text-[13px] font-semibold bg-[#00685d] text-white shadow-sm hover:bg-[#005249] transition active:scale-95 disabled:opacity-60"
                   >
-                    保存日程
+                    {isSaving ? '保存中…' : '保存日程'}
                   </button>
                 </div>
               </form>
@@ -525,7 +574,8 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
                 </span>
                 <p className="text-[13px] text-[#6f7975]">当前筛选条件下暂无待赴约日程</p>
                 <button
-                  onClick={() => setIsAddingNew(true)}
+                  type="button"
+                  onClick={openAddForm}
                   className="mt-2 text-[12px] text-[#00685d] font-semibold hover:underline"
                 >
                   + 添加就医日程

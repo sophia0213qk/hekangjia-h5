@@ -7,6 +7,16 @@ interface MedicationChecklistProps {
   onAddNewMed: () => void;
 }
 
+/** Display takenAt as YYYY-MM-DD HH:mm:ss (accepts ISO or already-formatted). */
+function formatTakenAt(value?: string | null): string {
+  if (!value) return '';
+  if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(value)) return value;
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return value;
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
+
 export const MedicationChecklist: React.FC<MedicationChecklistProps> = ({
   medications,
   onToggleTaken,
@@ -108,7 +118,7 @@ export const MedicationChecklist: React.FC<MedicationChecklistProps> = ({
                       done_all
                     </span>
                     <span className="text-[11px] font-bold">
-                      {med.takenAt || '已服'}
+                      {formatTakenAt(med.takenAt) || '已服'}
                     </span>
                   </button>
                 ) : (

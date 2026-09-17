@@ -39,4 +39,6 @@ async def scan_report(
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"OCR 识别失败: {exc}") from exc
 
+    # Relative path served via /api/v1/uploads/{filename}
+    result["source_file_url"] = f"/api/v1/uploads/{saved.name}"
     return ScanResult(**result)

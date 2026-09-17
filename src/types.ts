@@ -96,11 +96,13 @@ export interface LabReport {
   lab: string;
   statusTag: string;
   statusType: 'success' | 'warning' | 'info';
+  sourceFileUrl?: string;
   metrics: {
     name: string;
     value: string;
     reference: string;
     isNormal: boolean;
+    statusLabel?: string;
   }[];
 }
 

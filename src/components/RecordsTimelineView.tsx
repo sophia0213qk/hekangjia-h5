@@ -207,7 +207,14 @@ export const RecordsTimelineView: React.FC<RecordsTimelineViewProps> = ({
           </div>
 
           <div className="space-y-3">
-            {filteredRecords.map((rec) => {
+            {filteredRecords.length === 0 ? (
+              <div className="py-8 text-center rounded-2xl bg-[#f8f9ff] border border-dashed border-[#00685d]/20">
+                <span className="material-symbols-outlined text-[32px] text-[#6f7975]">clinical_notes</span>
+                <p className="mt-2 text-[13px] font-bold text-[#131e1a]">暂无就诊随访记录</p>
+                <p className="text-[11px] text-[#6f7975] mt-1">点击上方「录入就诊」添加门诊与复查档案</p>
+              </div>
+            ) : (
+              filteredRecords.map((rec) => {
               const mem = members.find((m) => m.id === rec.memberId);
               return (
                 <div
@@ -245,7 +252,8 @@ export const RecordsTimelineView: React.FC<RecordsTimelineViewProps> = ({
                   </div>
                 </div>
               );
-            })}
+            })
+            )}
           </div>
         </section>
       </div>

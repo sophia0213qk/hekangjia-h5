@@ -1,12 +1,20 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { FamilyMember, MedicalRecord } from '../types';
 
 interface AddRecordModalProps {
   isOpen: boolean;
   onClose: () => void;
   members: FamilyMember[];
-  onAddRecord: (record: MedicalRecord) => void;
+  onAddRecord: (record: MedicalRecord) => void | Promise<void>;
 }
+
+const todayIso = () => new Date().toISOString().slice(0, 10);
+
+const formatDisplayDate = (iso: string) => {
+  const [y, m, d] = iso.split('-').map(Number);
+  if (!y || !m || !d) return iso;
+  return `${y}年${m}月${d}日`;
+};
 
 export const AddRecordModal: React.FC<AddRecordModalProps> = ({
   isOpen,
@@ -14,34 +22,64 @@ export const AddRecordModal: React.FC<AddRecordModalProps> = ({
   members,
   onAddRecord,
 }) => {
-  const [memberId, setMemberId] = useState('father');
+  const [memberId, setMemberId] = useState('');
   const [hospital, setHospital] = useState('四川大学华西医院');
   const [department, setDepartment] = useState('心血管内科');
-  const [date, setDate] = useState('2025年5月18日');
+  const [date, setDate] = useState(todayIso());
   const [doctor, setDoctor] = useState('门诊复查 · 主任医师');
   const [complaint, setComplaint] = useState('');
   const [diagnosis, setDiagnosis] = useState('');
   const [orders, setOrders] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    if (!isOpen) return;
+    setError('');
+    setSaving(false);
+    setDate(todayIso());
+    setComplaint('');
+    setDiagnosis('');
+    setOrders('');
+    if (members[0]?.id) setMemberId(members[0].id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen]);
+
+  useEffect(() => {
+    if (!memberId && members[0]?.id) setMemberId(members[0].id);
+  }, [members, memberId]);
 
   if (!isOpen) return null;
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setError('');
+    if (!memberId || !members.some((m) => m.id === memberId)) {
+      setError('请选择就诊人');
+      return;
+    }
     const newRecord: MedicalRecord = {
       id: `rec-${Date.now()}`,
       memberId,
       hospital: hospital.trim() || '社区医院',
       department: department.trim() || '全科门诊',
-      date,
-      doctor,
+      date: formatDisplayDate(date) || date,
+      doctor: doctor.trim() || '门诊医师',
       status: '已完成复诊',
       complaint: complaint.trim() || '常规复诊检查',
       diagnosis: diagnosis.trim() || '慢病稳定调理期',
       orders: orders.trim() || '遵医用药，定期自测体征，适度运动。',
     };
 
-    onAddRecord(newRecord);
-    onClose();
+    setSaving(true);
+    try {
+      await onAddRecord(newRecord);
+      onClose();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '保存失败，请重试');
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -55,6 +93,7 @@ export const AddRecordModal: React.FC<AddRecordModalProps> = ({
             <h3 className="text-[17px] font-bold text-[#131e1a]">录入就诊与复查记录</h3>
           </div>
           <button
+            type="button"
             onClick={onClose}
             className="w-8 h-8 rounded-full flex items-center justify-center text-gray-400 hover:bg-gray-100"
           >
@@ -68,13 +107,18 @@ export const AddRecordModal: React.FC<AddRecordModalProps> = ({
             <select
               value={memberId}
               onChange={(e) => setMemberId(e.target.value)}
+              required
               className="w-full h-11 px-3 rounded-xl bg-[#f0fcf5] border border-[#00685d]/10 text-[13px] font-medium focus:outline-none"
             >
-              {members.map((m) => (
-                <option key={m.id} value={m.id}>
-                  {m.nickname} · {m.name}
-                </option>
-              ))}
+              {members.length === 0 ? (
+                <option value="">暂无家庭成员</option>
+              ) : (
+                members.map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.nickname} · {m.name}
+                  </option>
+                ))
+              )}
             </select>
           </div>
 
@@ -105,7 +149,7 @@ export const AddRecordModal: React.FC<AddRecordModalProps> = ({
             <div className="space-y-1">
               <label className="text-[12px] text-[#6f7975] font-medium">就诊日期</label>
               <input
-                type="text"
+                type="date"
                 value={date}
                 onChange={(e) => setDate(e.target.value)}
                 className="w-full h-11 px-3 rounded-xl bg-[#f0fcf5] border border-[#00685d]/10 text-[13px] font-medium focus:outline-none"
@@ -155,19 +199,25 @@ export const AddRecordModal: React.FC<AddRecordModalProps> = ({
             />
           </div>
 
+          {error ? (
+            <p className="text-[12px] text-[#a7391e] bg-[#fdecea] rounded-xl px-3 py-2">{error}</p>
+          ) : null}
+
           <div className="flex items-center gap-2 pt-2">
             <button
               type="button"
               onClick={onClose}
+              disabled={saving}
               className="flex-1 py-3 rounded-xl bg-[#f0fcf5] text-[#3e4946] font-semibold text-[14px]"
             >
               取消
             </button>
             <button
               type="submit"
-              className="flex-1 py-3 rounded-xl bg-[#00685d] hover:bg-[#005047] text-white font-bold text-[14px] shadow-md active:scale-95 transition-all"
+              disabled={saving || members.length === 0}
+              className="flex-1 py-3 rounded-xl bg-[#00685d] hover:bg-[#005047] text-white font-bold text-[14px] shadow-md active:scale-95 transition-all disabled:opacity-60"
             >
-              保存记录
+              {saving ? '保存中…' : '保存记录'}
             </button>
           </div>
         </form>

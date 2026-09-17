@@ -1,4 +1,5 @@
 from datetime import datetime
+import mimetypes
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
@@ -80,12 +81,28 @@ def create_lab_report(
     member = _member(db, body.memberId, user.family_id)
     metrics = []
     for item in body.metrics:
+        status_label = item.get("statusLabel") or item.get("status") or ""
+        is_normal = item.get("isNormal")
+        if is_normal is None:
+            is_normal = str(status_label).lower() not in {
+                "abnormal",
+                "high",
+                "low",
+                "异常",
+                "偏高",
+                "偏低",
+            }
+        reference = str(item.get("reference") or "").strip()
+        if reference in {"参考区间内", "正常", "异常", "偏高", "偏低"}:
+            reference = ""
         metrics.append(
             {
                 "name": item.get("name", ""),
                 "value": item.get("value", ""),
-                "reference": item.get("reference", item.get("status", "")),
-                "isNormal": item.get("isNormal", item.get("status") != "abnormal"),
+                "reference": reference or "—",
+                "isNormal": bool(is_normal),
+                "statusLabel": status_label
+                or ("正常" if is_normal else "异常"),
             }
         )
     row = models.LabReport(
@@ -102,6 +119,47 @@ def create_lab_report(
     db.commit()
     db.refresh(row)
     return lab_to_out(row)
+
+
+@router.get("/lab-reports/{report_id}/original")
+def download_lab_original(
+    report_id: str,
+    user: models.User = Depends(require_family),
+    db: Session = Depends(get_db),
+):
+    from pathlib import Path
+
+    from fastapi.responses import FileResponse
+
+    from app.core.config import get_settings
+
+    row = db.get(models.LabReport, parse_uuid(report_id))
+    if not row:
+        raise HTTPException(status_code=404, detail="报告不存在")
+    member = db.get(models.Member, row.member_id)
+    if not member or member.family_id != user.family_id:
+        raise HTTPException(status_code=404, detail="报告不存在")
+    if not row.source_file_url:
+        raise HTTPException(status_code=404, detail="暂无上传原图，请重新拍照或上传化验单后再归档")
+
+    settings = get_settings()
+    name = Path(row.source_file_url).name
+    path = Path(settings.upload_dir) / name
+    if not path.is_file():
+        # Also try absolute/relative as stored
+        alt = Path(row.source_file_url)
+        if alt.is_file():
+            path = alt
+        else:
+            raise HTTPException(status_code=404, detail="原图文件已丢失，请重新上传化验单")
+
+    media = mimetypes.guess_type(str(path))[0] or "application/octet-stream"
+    return FileResponse(
+        path,
+        filename=name,
+        media_type=media,
+        content_disposition_type="attachment",
+    )
 
 
 @router.get("/schedules")

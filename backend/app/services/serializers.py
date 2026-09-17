@@ -49,6 +49,14 @@ def member_to_out(m: models.Member, pending_todos: int = 0) -> dict:
     }
 
 
+def _format_taken_at(value: datetime | None) -> str | None:
+    if not value:
+        return None
+    # Store as UTC; display in local wall-clock for UI
+    local = value.astimezone() if value.tzinfo else value
+    return local.strftime("%Y-%m-%d %H:%M:%S")
+
+
 def medication_to_out(med: models.Medication, member_name: str, today: date | None = None) -> dict:
     today = today or date.today()
     intake = next((i for i in (med.intakes or []) if i.taken_date == today), None)
@@ -71,7 +79,7 @@ def medication_to_out(med: models.Medication, member_name: str, today: date | No
         "stockWarning": med.stock_warning,
         "remainingDays": remaining,
         "isTakenToday": intake is not None,
-        "takenAt": intake.taken_at.isoformat() if intake and intake.taken_at else None,
+        "takenAt": _format_taken_at(intake.taken_at) if intake else None,
         "scheduleMode": med.schedule_mode,
         "startDate": med.start_date,
         "duration": med.duration,
@@ -102,6 +110,7 @@ def lab_to_out(r: models.LabReport) -> dict:
         "lab": r.lab,
         "statusTag": r.status_tag,
         "statusType": r.status_type,
+        "sourceFileUrl": r.source_file_url or "",
         "metrics": r.metrics or [],
     }
 

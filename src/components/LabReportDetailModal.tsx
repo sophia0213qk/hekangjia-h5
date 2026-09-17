@@ -1,23 +1,68 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { LabReport } from '../types';
+import { api } from '../api/client';
 
 interface LabReportDetailModalProps {
   isOpen: boolean;
   onClose: () => void;
   report: LabReport | null;
+  onShowToast?: (msg: string) => void;
+}
+
+function downloadBlob(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+function guessExt(report: LabReport, blob: Blob): string {
+  const fromUrl = report.sourceFileUrl?.match(/\.(jpe?g|png|webp|gif|bmp|pdf)$/i)?.[0];
+  if (fromUrl) return fromUrl.toLowerCase();
+  const mime = blob.type || '';
+  if (mime.includes('png')) return '.png';
+  if (mime.includes('webp')) return '.webp';
+  if (mime.includes('gif')) return '.gif';
+  if (mime.includes('pdf')) return '.pdf';
+  return '.jpg';
 }
 
 export const LabReportDetailModal: React.FC<LabReportDetailModalProps> = ({
   isOpen,
   onClose,
   report,
+  onShowToast,
 }) => {
+  const [exporting, setExporting] = useState(false);
+
   if (!isOpen || !report) return null;
+
+  const handleExport = async () => {
+    setExporting(true);
+    try {
+      // Always fetch original uploaded image from server (not HTML)
+      const blob = await api.downloadLabOriginal(report.id);
+      const safeTitle = (report.title || '化验报告原单').replace(/[\\/:*?"<>|]/g, '_');
+      downloadBlob(blob, `${safeTitle}${guessExt(report, blob)}`);
+      onShowToast?.('已导出上传的原报告图片');
+    } catch (e) {
+      onShowToast?.(
+        e instanceof Error
+          ? e.message
+          : '导出失败：未找到上传原图，请重新拍照/上传化验单后再归档'
+      );
+    } finally {
+      setExporting(false);
+    }
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
       <div className="w-full max-w-lg bg-white rounded-3xl p-5 shadow-2xl border border-[#00685d]/10 space-y-4 max-h-[90vh] overflow-y-auto">
-        {/* Header */}
         <div className="flex items-center justify-between pb-2 border-b border-[#00685d]/10">
           <div className="flex items-center gap-2">
             <span className="material-symbols-outlined text-[#00685d] text-[22px]">
@@ -26,6 +71,7 @@ export const LabReportDetailModal: React.FC<LabReportDetailModalProps> = ({
             <h3 className="text-[17px] font-bold text-[#131e1a]">化验检查详细报告</h3>
           </div>
           <button
+            type="button"
             onClick={onClose}
             className="w-8 h-8 rounded-full flex items-center justify-center text-gray-400 hover:bg-gray-100"
           >
@@ -33,7 +79,6 @@ export const LabReportDetailModal: React.FC<LabReportDetailModalProps> = ({
           </button>
         </div>
 
-        {/* Report Meta Card */}
         <div className="p-3.5 rounded-2xl bg-[#f0fcf5] border border-[#00685d]/15 space-y-1.5">
           <div className="flex items-center justify-between">
             <h4 className="text-[15px] font-bold text-[#131e1a]">{report.title}</h4>
@@ -53,7 +98,6 @@ export const LabReportDetailModal: React.FC<LabReportDetailModalProps> = ({
           </div>
         </div>
 
-        {/* Metrics Table */}
         <div className="space-y-1.5">
           <span className="text-[12px] font-bold text-[#131e1a]">检测项目与参考值比对</span>
           <div className="border border-[#00685d]/10 rounded-2xl overflow-hidden">
@@ -80,7 +124,7 @@ export const LabReportDetailModal: React.FC<LabReportDetailModalProps> = ({
                             : 'bg-[#ffdad2] text-[#a7391e]'
                         }`}
                       >
-                        {m.isNormal ? '正常' : '偏低'}
+                        {m.statusLabel || (m.isNormal ? '正常' : '异常')}
                       </span>
                     </td>
                   </tr>
@@ -88,10 +132,6 @@ export const LabReportDetailModal: React.FC<LabReportDetailModalProps> = ({
               </tbody>
             </table>
           </div>
-        </div>
-
-        <div className="p-3 rounded-xl bg-[#f8f9ff] text-[11px] text-[#6f7975] leading-relaxed">
-          <strong>医生结论提示：</strong> 各项关键生化指标均在安全目标范围内，继续维持现有降压及作息调养即可。下季度按时随访。
         </div>
 
         <div className="flex items-center gap-2 pt-1">
@@ -104,12 +144,11 @@ export const LabReportDetailModal: React.FC<LabReportDetailModalProps> = ({
           </button>
           <button
             type="button"
-            onClick={() => {
-              alert('已调起系统分享 / 打印原图');
-            }}
-            className="flex-1 py-2.5 rounded-xl bg-[#00685d] hover:bg-[#005047] text-white text-[13px] font-bold shadow-sm"
+            disabled={exporting}
+            onClick={() => void handleExport()}
+            className="flex-1 py-2.5 rounded-xl bg-[#00685d] hover:bg-[#005047] text-white text-[13px] font-bold shadow-sm disabled:opacity-60"
           >
-            导出报告原单
+            {exporting ? '导出中…' : '导出报告原单'}
           </button>
         </div>
       </div>
