@@ -1,0 +1,8 @@
+{
+  "name": "Remix 禾康家",
+  "description": "温暖三代家庭健康守护平台，集成体征看板、用药提醒、就医随访日程与成员健康档案。",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
