@@ -1,5 +1,6 @@
 import React from 'react';
 import { FamilyMember } from '../types';
+import { hasRecordedVitals } from '../utils/vitals';
 
 interface VitalsGridProps {
   members: FamilyMember[];
@@ -7,15 +8,143 @@ interface VitalsGridProps {
   onRecordVitals: () => void;
 }
 
+type VitalCard = {
+  memberId: string;
+  label: string;
+  value: string;
+  unit: string;
+  detail: string;
+  status: string;
+  icon: string;
+  accent: string;
+  kind: 'bp' | 'sugar' | 'hr' | 'temp' | 'sleep';
+  history?: number[];
+  tempValue?: number;
+};
+
+function memberLabel(m: FamilyMember): string {
+  return m.nickname || m.relation || m.name;
+}
+
+function pickVitalCard(m: FamilyMember): VitalCard | null {
+  const label = memberLabel(m);
+  const v = m.vitals;
+  if (!v) return null;
+
+  const bp = v.bloodPressure;
+  if (
+    bp &&
+    bp.status !== '待录入' &&
+    bp.measuredAt &&
+    bp.measuredAt !== '暂无' &&
+    Number.isFinite(bp.systolic) &&
+    Number.isFinite(bp.diastolic)
+  ) {
+    return {
+      memberId: m.id,
+      label: `${label} · 血压`,
+      value: `${bp.systolic}/${bp.diastolic}`,
+      unit: 'mmHg',
+      detail: bp.changeText || bp.measuredAt,
+      status: bp.status || '',
+      icon: 'monitor_heart',
+      accent: '#00685d',
+      kind: 'bp',
+      history: bp.history,
+    };
+  }
+
+  if (v.bloodSugar?.value != null) {
+    return {
+      memberId: m.id,
+      label: `${label} · ${v.bloodSugar.timing?.includes('餐后') ? '餐后血糖' : '空腹血糖'}`,
+      value: String(v.bloodSugar.value),
+      unit: v.bloodSugar.unit || 'mmol/L',
+      detail: '标准范围 3.9 ~ 6.1',
+      status: v.bloodSugar.status || '',
+      icon: 'opacity',
+      accent: '#904800',
+      kind: 'sugar',
+    };
+  }
+
+  if (v.heartRate?.value != null) {
+    return {
+      memberId: m.id,
+      label: `${label} · 心率`,
+      value: String(v.heartRate.value),
+      unit: v.heartRate.unit || '次/分',
+      detail: v.heartRate.rhythm || '',
+      status: v.heartRate.status || '',
+      icon: 'ecg',
+      accent: '#00685d',
+      kind: 'hr',
+    };
+  }
+
+  if (v.temperature?.value != null) {
+    return {
+      memberId: m.id,
+      label: `${label} · 体温`,
+      value: String(v.temperature.value),
+      unit: v.temperature.unit || '℃',
+      detail: v.temperature.timeAgo || '',
+      status: v.temperature.status || '',
+      icon: 'device_thermostat',
+      accent: '#208275',
+      kind: 'temp',
+      tempValue: v.temperature.value,
+    };
+  }
+
+  if (v.sleep?.score != null) {
+    return {
+      memberId: m.id,
+      label: `${label} · 昨晚睡眠`,
+      value: String(v.sleep.score),
+      unit: '分',
+      detail: [v.sleep.duration, v.sleep.deepSleep ? `深睡 ${v.sleep.deepSleep}` : '']
+        .filter(Boolean)
+        .join(' · '),
+      status: v.sleep.status || '',
+      icon: 'bedtime',
+      accent: '#208275',
+      kind: 'sleep',
+    };
+  }
+
+  return null;
+}
+
+function historyPath(history: number[] | undefined): string {
+  if (!history || history.length < 2) {
+    return 'M0,18 Q18,6 35,14 T70,9 T100,12';
+  }
+  const min = Math.min(...history);
+  const max = Math.max(...history);
+  const span = Math.max(max - min, 1);
+  const step = 100 / (history.length - 1);
+  return history
+    .map((n, i) => {
+      const x = i * step;
+      const y = 22 - ((n - min) / span) * 18;
+      return `${i === 0 ? 'M' : 'L'}${x},${y}`;
+    })
+    .join(' ');
+}
+
 export const VitalsGrid: React.FC<VitalsGridProps> = ({
   members,
   onOpenDetails,
   onRecordVitals,
 }) => {
-  const father = members.find((m) => m.id === 'father');
-  const son = members.find((m) => m.id === 'son');
-  const wan = members.find((m) => m.id === 'wan');
-  const mother = members.find((m) => m.id === 'mother');
+  const cards = members
+    .map(pickVitalCard)
+    .filter((c): c is VitalCard => c != null)
+    .slice(0, 4);
+
+  const firstMemberId = members[0]?.id;
+  const hasAny = members.some(hasRecordedVitals);
 
   return (
     <section className="flex flex-col space-y-2.5">
@@ -28,189 +157,123 @@ export const VitalsGrid: React.FC<VitalsGridProps> = ({
             家庭体征看板
           </h2>
         </div>
+        {firstMemberId ? (
+          <button
+            onClick={() => onOpenDetails(firstMemberId)}
+            className="text-[12px] text-[#00685d] font-semibold flex items-center hover:underline"
+          >
+            全部数据
+            <span className="material-symbols-outlined text-[14px]">chevron_right</span>
+          </button>
+        ) : null}
+      </div>
+
+      {!hasAny || cards.length === 0 ? (
         <button
-          onClick={() => onOpenDetails('father')}
-          className="text-[12px] text-[#00685d] font-semibold flex items-center hover:underline"
+          type="button"
+          onClick={onRecordVitals}
+          className="bg-white rounded-2xl p-5 shadow-sm border border-dashed border-[#00685d]/25 flex flex-col items-center justify-center gap-2 text-center hover:border-[#00685d]/50 transition-colors"
         >
-          全部数据
-          <span className="material-symbols-outlined text-[14px]">chevron_right</span>
+          <span className="material-symbols-outlined text-[#00685d] text-[28px]">
+            add_chart
+          </span>
+          <p className="text-[14px] font-semibold text-[#131e1a]">暂无体征数据</p>
+          <p className="text-[12px] text-[#6f7975]">录入血压、血糖等，看板会显示家人最新状态</p>
         </button>
-      </div>
-
-      <div className="grid grid-cols-2 gap-3">
-        {/* Card 1: Father's Blood Pressure */}
-        <div
-          onClick={() => onOpenDetails('father')}
-          className="bg-white rounded-2xl p-3.5 shadow-sm border border-[#00685d]/10 flex flex-col justify-between space-y-2 cursor-pointer hover:border-[#00685d]/30 transition-all group"
-        >
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-1.5">
-              <span className="w-2 h-2 rounded-full bg-[#00685d]"></span>
-              <span className="text-[12px] text-[#6f7975] font-medium">父亲 · 血压</span>
-            </div>
-            <div className="w-6 h-6 rounded-full bg-[#e5f1ea] flex items-center justify-center text-[#00685d] group-hover:scale-110 transition-transform">
-              <span className="material-symbols-outlined text-[14px]">monitor_heart</span>
-            </div>
-          </div>
-
-          <div>
-            <div className="flex items-baseline gap-1">
-              <span className="text-[26px] leading-tight font-extrabold text-[#131e1a] tracking-tight font-['Plus_Jakarta_Sans']">
-                {father?.vitals.bloodPressure.systolic || 124}/
-                {father?.vitals.bloodPressure.diastolic || 82}
-              </span>
-              <span className="text-[11px] text-[#6f7975]">mmHg</span>
-            </div>
-            <div className="flex items-center gap-1.5 mt-1">
-              <span className="bg-[#9af3e3]/60 text-[#005047] text-[11px] font-semibold px-1.5 py-0.5 rounded-full inline-flex items-center">
-                <span className="material-symbols-outlined text-[12px]">trending_down</span>
-                {father?.vitals.bloodPressure.changeText || '-4 昨日'}
-              </span>
-              <span className="text-[11px] text-[#00685d] font-medium">
-                {father?.vitals.bloodPressure.status || '稳态正常'}
-              </span>
-            </div>
-          </div>
-
-          {/* Inline Soft Spline SVG Trend */}
-          <div className="w-full h-8 pt-1">
-            <svg
-              className="w-full h-full text-[#00685d]"
-              fill="none"
-              preserveAspectRatio="none"
-              viewBox="0 0 100 24"
+      ) : (
+        <div className="grid grid-cols-2 gap-3">
+          {cards.map((card) => (
+            <div
+              key={`${card.memberId}-${card.kind}`}
+              onClick={() => onOpenDetails(card.memberId)}
+              className="bg-white rounded-2xl p-3.5 shadow-sm border border-[#00685d]/10 flex flex-col justify-between space-y-2 cursor-pointer hover:border-[#00685d]/30 transition-all group"
             >
-              <path
-                d="M0,18 Q18,6 35,14 T70,9 T100,12"
-                stroke="currentColor"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth="2.5"
-              />
-              <path
-                d="M0,18 Q18,6 35,14 T70,9 T100,12 L100,24 L0,24 Z"
-                fill="currentColor"
-                fillOpacity="0.08"
-              />
-            </svg>
-          </div>
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <span
+                    className="w-2 h-2 rounded-full shrink-0"
+                    style={{ backgroundColor: card.accent }}
+                  />
+                  <span className="text-[12px] text-[#6f7975] font-medium truncate">
+                    {card.label}
+                  </span>
+                </div>
+                <div
+                  className="w-6 h-6 rounded-full flex items-center justify-center group-hover:scale-110 transition-transform shrink-0"
+                  style={{ backgroundColor: `${card.accent}18`, color: card.accent }}
+                >
+                  <span className="material-symbols-outlined text-[14px]">{card.icon}</span>
+                </div>
+              </div>
+
+              <div>
+                <div className="flex items-baseline gap-1">
+                  <span className="text-[26px] leading-tight font-extrabold text-[#131e1a] tracking-tight font-['Plus_Jakarta_Sans']">
+                    {card.value}
+                  </span>
+                  <span className="text-[11px] text-[#6f7975]">{card.unit}</span>
+                </div>
+                {(card.detail || card.status) && (
+                  <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+                    {card.detail ? (
+                      <span className="text-[11px] text-[#6f7975] font-medium truncate">
+                        {card.detail}
+                      </span>
+                    ) : null}
+                    {card.status ? (
+                      <span className="text-[11px] text-[#00685d] font-medium truncate">
+                        {card.status}
+                      </span>
+                    ) : null}
+                  </div>
+                )}
+              </div>
+
+              {card.kind === 'bp' ? (
+                <div className="w-full h-8 pt-1">
+                  <svg
+                    className="w-full h-full text-[#00685d]"
+                    fill="none"
+                    preserveAspectRatio="none"
+                    viewBox="0 0 100 24"
+                  >
+                    <path
+                      d={historyPath(card.history)}
+                      stroke="currentColor"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth="2.5"
+                    />
+                  </svg>
+                </div>
+              ) : card.kind === 'temp' && card.tempValue != null ? (
+                <div className="w-full flex flex-col space-y-1 pt-2">
+                  <div className="w-full h-2 rounded-full bg-[#e5f1ea] overflow-hidden flex">
+                    <div
+                      className="bg-[#00685d] h-full rounded-full transition-all duration-500"
+                      style={{
+                        width: `${Math.min(100, Math.max(0, ((card.tempValue - 36) / 1.5) * 100))}%`,
+                      }}
+                    />
+                  </div>
+                  <div className="flex justify-between text-[#6f7975] text-[10px]">
+                    <span>36.0°</span>
+                    <span className="text-[#a7391e] font-medium">37.2°警戒</span>
+                  </div>
+                </div>
+              ) : card.status ? (
+                <div className="pt-1">
+                  <span className="w-full block py-1 text-center text-[11px] font-semibold rounded-lg bg-[#e5f1ea] text-[#00685d]">
+                    {card.status}
+                  </span>
+                </div>
+              ) : (
+                <div className="h-2" />
+              )}
+            </div>
+          ))}
         </div>
-
-        {/* Card 2: Son's Temperature */}
-        <div
-          onClick={() => onOpenDetails('son')}
-          className="bg-white rounded-2xl p-3.5 shadow-sm border border-[#00685d]/10 flex flex-col justify-between space-y-2 cursor-pointer hover:border-[#00685d]/30 transition-all group"
-        >
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-1.5">
-              <span className="w-2 h-2 rounded-full bg-[#208275]"></span>
-              <span className="text-[12px] text-[#6f7975] font-medium">睿睿 · 耳温</span>
-            </div>
-            <div className="w-6 h-6 rounded-full bg-[#e5f1ea] flex items-center justify-center text-[#208275] group-hover:scale-110 transition-transform">
-              <span className="material-symbols-outlined text-[14px]">device_thermostat</span>
-            </div>
-          </div>
-
-          <div>
-            <div className="flex items-baseline gap-1">
-              <span className="text-[26px] leading-tight font-extrabold text-[#131e1a] tracking-tight font-['Plus_Jakarta_Sans']">
-                {son?.vitals.temperature?.value || 36.6}
-              </span>
-              <span className="text-[11px] text-[#6f7975]">℃</span>
-            </div>
-            <div className="flex items-center gap-1.5 mt-1">
-              <span className="bg-[#e5eeff] text-[#3e4946] text-[11px] font-semibold px-1.5 py-0.5 rounded-full inline-flex items-center">
-                {son?.vitals.temperature?.timeAgo || '4小时前'}
-              </span>
-              <span className="text-[11px] text-[#00685d] font-medium">
-                {son?.vitals.temperature?.status || '体温平稳'}
-              </span>
-            </div>
-          </div>
-
-          {/* Visual Thermometer Gauge Bar */}
-          <div className="w-full flex flex-col space-y-1 pt-2">
-            <div className="w-full h-2 rounded-full bg-[#e5f1ea] overflow-hidden flex">
-              <div
-                className="bg-[#00685d] h-full rounded-full transition-all duration-500"
-                style={{ width: '55%' }}
-              ></div>
-            </div>
-            <div className="flex justify-between text-[#6f7975] text-[10px]">
-              <span>36.0°</span>
-              <span className="text-[#a7391e] font-medium">37.2°警戒</span>
-            </div>
-          </div>
-        </div>
-
-        {/* Card 3: Lin Wan's Sleep Score */}
-        <div
-          onClick={() => onOpenDetails('wan')}
-          className="bg-white rounded-2xl p-3.5 shadow-sm border border-[#00685d]/10 flex flex-col justify-between space-y-2 cursor-pointer hover:border-[#00685d]/30 transition-all group"
-        >
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-1.5">
-              <span className="w-2 h-2 rounded-full bg-[#208275]"></span>
-              <span className="text-[12px] text-[#6f7975] font-medium">我 · 昨晚睡眠</span>
-            </div>
-            <div className="w-6 h-6 rounded-full bg-[#e5eeff] flex items-center justify-center text-[#208275] group-hover:scale-110 transition-transform">
-              <span className="material-symbols-outlined text-[14px]">bedtime</span>
-            </div>
-          </div>
-
-          <div>
-            <div className="flex items-baseline gap-1">
-              <span className="text-[26px] leading-tight font-extrabold text-[#131e1a] tracking-tight font-['Plus_Jakarta_Sans']">
-                {wan?.vitals.sleep?.score || 88}
-              </span>
-              <span className="text-[11px] text-[#6f7975]">分</span>
-            </div>
-            <p className="text-[11px] text-[#6f7975] mt-0.5 truncate">
-              {wan?.vitals.sleep?.duration || '7小时42分'} · 深睡 {wan?.vitals.sleep?.deepSleep || '2h10m'}
-            </p>
-          </div>
-
-          <div className="pt-1">
-            <span className="w-full block py-1 text-center text-[11px] font-semibold rounded-lg bg-[#e5f1ea] text-[#00685d]">
-              {wan?.vitals.sleep?.status || '精力恢复充沛'}
-            </span>
-          </div>
-        </div>
-
-        {/* Card 4: Mother's Fasting Glucose */}
-        <div
-          onClick={() => onOpenDetails('mother')}
-          className="bg-white rounded-2xl p-3.5 shadow-sm border border-[#00685d]/10 flex flex-col justify-between space-y-2 cursor-pointer hover:border-[#00685d]/30 transition-all group"
-        >
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-1.5">
-              <span className="w-2 h-2 rounded-full bg-[#904800]"></span>
-              <span className="text-[12px] text-[#6f7975] font-medium">母亲 · 空腹血糖</span>
-            </div>
-            <div className="w-6 h-6 rounded-full bg-[#ffdcc5] flex items-center justify-center text-[#904800] group-hover:scale-110 transition-transform">
-              <span className="material-symbols-outlined text-[14px]">opacity</span>
-            </div>
-          </div>
-
-          <div>
-            <div className="flex items-baseline gap-1">
-              <span className="text-[26px] leading-tight font-extrabold text-[#131e1a] tracking-tight font-['Plus_Jakarta_Sans']">
-                {mother?.vitals.bloodSugar?.value || 5.6}
-              </span>
-              <span className="text-[11px] text-[#6f7975]">mmol/L</span>
-            </div>
-            <p className="text-[11px] text-[#6f7975] mt-0.5">
-              标准范围 3.9 ~ 6.1
-            </p>
-          </div>
-
-          <div className="pt-1">
-            <span className="w-full block py-1 text-center text-[11px] font-semibold rounded-lg bg-[#9af3e3]/50 text-[#00685d]">
-              {mother?.vitals.bloodSugar?.status || '达标且平稳'}
-            </span>
-          </div>
-        </div>
-      </div>
+      )}
     </section>
   );
 };

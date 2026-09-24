@@ -1,27 +1,36 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { FamilyMember, Medication } from '../types';
+import { MemberAvatar } from './MemberAvatar';
 
 interface AddMedicationViewProps {
   members: FamilyMember[];
-  onBack: () => void;
+  onBack?: () => void;
   onSave: (medication: Partial<Medication>) => void;
   onOpenScanCamera?: () => void;
 }
 
 interface ReminderSlot {
   id: string;
-  time: string;
-  label: string;
+  time: string; // HH:mm 24小时制
   enabled: boolean;
 }
 
 export const AddMedicationView: React.FC<AddMedicationViewProps> = ({
   members,
-  onBack,
   onSave,
   onOpenScanCamera,
 }) => {
-  const [selectedMemberId, setSelectedMemberId] = useState<string>('father');
+  const [selectedMemberId, setSelectedMemberId] = useState<string>('');
+
+  useEffect(() => {
+    if (!members.length) {
+      setSelectedMemberId('');
+      return;
+    }
+    if (!members.some((m) => m.id === selectedMemberId)) {
+      setSelectedMemberId(members[0].id);
+    }
+  }, [members, selectedMemberId]);
   // 药品通用名下输入药品名称应为空
   const [medName, setMedName] = useState<string>('');
   
@@ -57,7 +66,7 @@ export const AddMedicationView: React.FC<AddMedicationViewProps> = ({
 
   // 提醒时间点列表：支持点击添加与编辑
   const [reminderSlots, setReminderSlots] = useState<ReminderSlot[]>([
-    { id: '1', time: '08:00', label: '晨服', enabled: true },
+    { id: '1', time: '08:00', enabled: true },
   ]);
 
   const [notes, setNotes] = useState<string>('温开水送服');
@@ -84,25 +93,12 @@ export const AddMedicationView: React.FC<AddMedicationViewProps> = ({
   };
 
   const handleAddReminderSlot = () => {
-    const count = reminderSlots.length;
-    let nextTime = '12:30';
-    let nextLabel = '午服';
-    if (count === 1) {
-      nextTime = '12:30';
-      nextLabel = '午服';
-    } else if (count === 2) {
-      nextTime = '19:00';
-      nextLabel = '晚服';
-    } else if (count === 3) {
-      nextTime = '21:30';
-      nextLabel = '睡前';
-    } else {
-      nextTime = '16:00';
-      nextLabel = '加服';
-    }
+    const defaults = ['08:00', '12:30', '19:00', '21:30', '16:00'];
+    const used = new Set(reminderSlots.map((s) => s.time));
+    const nextTime = defaults.find((t) => !used.has(t)) || '08:00';
     setReminderSlots((prev) => [
       ...prev,
-      { id: `slot-${Date.now()}`, time: nextTime, label: nextLabel, enabled: true },
+      { id: `slot-${Date.now()}`, time: nextTime, enabled: true },
     ]);
   };
 
@@ -111,12 +107,23 @@ export const AddMedicationView: React.FC<AddMedicationViewProps> = ({
     setReminderSlots((prev) => prev.filter((s) => s.id !== id));
   };
 
-  const handleUpdateReminderTime = (id: string, time: string) => {
-    setReminderSlots((prev) => prev.map((s) => (s.id === id ? { ...s, time } : s)));
-  };
+  const pad2 = (n: number) => String(n).padStart(2, '0');
 
-  const handleUpdateReminderLabel = (id: string, label: string) => {
-    setReminderSlots((prev) => prev.map((s) => (s.id === id ? { ...s, label } : s)));
+  const bumpReminderPart = (id: string, part: 'hour' | 'minute', delta: number) => {
+    setReminderSlots((prev) =>
+      prev.map((s) => {
+        if (s.id !== id) return s;
+        let h = Number.parseInt(s.time.split(':')[0] || '8', 10);
+        let m = Number.parseInt(s.time.split(':')[1] || '0', 10);
+        if (part === 'hour') {
+          h = (h + delta + 24) % 24;
+        } else {
+          m = Math.round(m / 5) * 5;
+          m = (m + delta * 5 + 60) % 60;
+        }
+        return { ...s, time: `${pad2(h)}:${pad2(m)}` };
+      })
+    );
   };
 
   const handleToggleReminderSlot = (id: string) => {
@@ -129,7 +136,7 @@ export const AddMedicationView: React.FC<AddMedicationViewProps> = ({
     const mainTime = reminderSlots[0]?.time || '08:00';
     const timeLabels = reminderSlots
       .filter((s) => s.enabled)
-      .map((s) => `${s.time} ${s.label}`)
+      .map((s) => s.time)
       .join('，');
 
     const newMed: Partial<Medication> = {
@@ -142,7 +149,7 @@ export const AddMedicationView: React.FC<AddMedicationViewProps> = ({
       dosageForm,
       frequency,
       timeSlot: mainTime,
-      timeLabel: timeLabels || `${mainTime} ${mealTiming}`,
+      timeLabel: timeLabels || mainTime,
       mealTiming,
       tags: selectedTags,
       notes,
@@ -158,24 +165,12 @@ export const AddMedicationView: React.FC<AddMedicationViewProps> = ({
   };
 
   return (
-    <div className="min-h-screen bg-[#f0fcf5] text-[#131e1a] pb-24">
-      {/* Top Header Bar - 移除原右上角问号帮助与头像图标 */}
-      <header className="sticky top-0 z-30 bg-[#f0fcf5]/90 backdrop-blur-xl border-b border-[#00685d]/10 px-4 h-16 flex items-center justify-between">
-        <button
-          onClick={onBack}
-          aria-label="返回上一页"
-          className="flex items-center gap-1 text-[#3e4946] hover:text-[#00685d] transition-colors py-2 px-1 cursor-pointer"
-        >
-          <span className="material-symbols-outlined text-[22px]">arrow_back_ios_new</span>
-          <span className="text-[14px] font-semibold">返回</span>
-        </button>
-
+    <div className="min-h-screen bg-[#f0fcf5] text-[#131e1a] pb-28">
+      {/* Top Header — 与病历一致，通过底部导航切换离开，无需强制返回 */}
+      <header className="sticky top-0 z-30 bg-[#f0fcf5]/90 backdrop-blur-xl border-b border-[#00685d]/10 px-4 h-16 flex items-center justify-center">
         <h1 className="text-[17px] font-bold text-[#131e1a] font-['Plus_Jakarta_Sans']">
           添加新药
         </h1>
-
-        {/* 占位以保持标题居中对称 */}
-        <div className="w-12"></div>
       </header>
 
       {/* Main Form Body */}
@@ -190,22 +185,22 @@ export const AddMedicationView: React.FC<AddMedicationViewProps> = ({
             </span>
           </div>
 
-          <div className="grid grid-cols-3 gap-2.5">
-            {members.slice(0, 3).map((member) => {
+          <div className="flex gap-2.5 overflow-x-auto pb-1 -mx-1 px-1 snap-x snap-mandatory">
+            {members.map((member) => {
               const isSelected = selectedMemberId === member.id;
               return (
                 <button
                   key={member.id}
                   type="button"
                   onClick={() => setSelectedMemberId(member.id)}
-                  className={`relative flex flex-col items-center p-3 rounded-2xl transition-all text-left cursor-pointer ${
+                  className={`relative flex flex-col items-center p-3 rounded-2xl transition-all text-left cursor-pointer shrink-0 w-[30%] min-w-[100px] snap-start ${
                     isSelected
                       ? 'bg-white shadow-sm ring-2 ring-[#00685d] scale-[1.02]'
                       : 'bg-white/70 hover:bg-white border border-[#00685d]/10 opacity-75'
                   }`}
                 >
                   <div className="relative mb-1.5">
-                    <img
+                    <MemberAvatar
                       src={member.avatar}
                       alt={member.name}
                       className="w-12 h-12 rounded-full object-cover ring-2 ring-[#00685d]/20"
@@ -217,9 +212,9 @@ export const AddMedicationView: React.FC<AddMedicationViewProps> = ({
                     )}
                   </div>
                   <span className="text-[12px] font-bold text-[#131e1a] truncate w-full text-center">
-                    {member.nickname} · {member.name}
+                    {member.nickname || member.relation} · {member.name}
                   </span>
-                  <span className="text-[11px] text-[#00685d] font-medium mt-0.5">
+                  <span className="text-[11px] text-[#00685d] font-medium mt-0.5 truncate w-full text-center">
                     {member.statusText}
                   </span>
                 </button>
@@ -527,14 +522,14 @@ export const AddMedicationView: React.FC<AddMedicationViewProps> = ({
                     setFrequency(f);
                     if (f === '每日 2 次' && reminderSlots.length < 2) {
                       setReminderSlots([
-                        { id: '1', time: '08:00', label: '晨服', enabled: true },
-                        { id: '2', time: '19:00', label: '晚服', enabled: true },
+                        { id: '1', time: '08:00', enabled: true },
+                        { id: '2', time: '19:00', enabled: true },
                       ]);
                     } else if (f === '每日 3 次' && reminderSlots.length < 3) {
                       setReminderSlots([
-                        { id: '1', time: '08:00', label: '晨服', enabled: true },
-                        { id: '2', time: '12:30', label: '午服', enabled: true },
-                        { id: '3', time: '19:00', label: '晚服', enabled: true },
+                        { id: '1', time: '08:00', enabled: true },
+                        { id: '2', time: '12:30', enabled: true },
+                        { id: '3', time: '19:00', enabled: true },
                       ]);
                     }
                   }}
@@ -570,75 +565,139 @@ export const AddMedicationView: React.FC<AddMedicationViewProps> = ({
           {/* Reminder Time Slots List */}
           <div className="space-y-2">
             <label className="text-[12px] text-[#6f7975] font-medium">设定服药提醒时间点</label>
-            
-            <div className="space-y-2">
-              {reminderSlots.map((slot, index) => (
-                <div
-                  key={slot.id}
-                  className="p-3 rounded-xl bg-[#f0fcf5] border border-[#00685d]/15 flex items-center justify-between shadow-2xs"
-                >
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-full bg-white flex items-center justify-center text-[#00685d] shadow-xs">
-                      <span className="material-symbols-outlined text-[20px]">
-                        {slot.label === '晨服' ? 'wb_sunny' : slot.label === '午服' ? 'light_mode' : 'bedtime'}
-                      </span>
+
+            <div className="space-y-2.5">
+              {reminderSlots.map((slot, index) => {
+                const [hour = '08', minute = '00'] = slot.time.split(':');
+                return (
+                  <div
+                    key={slot.id}
+                    className={`rounded-2xl border p-3.5 transition-opacity ${
+                      slot.enabled
+                        ? 'bg-white border-[#00685d]/15 shadow-sm'
+                        : 'bg-[#f0fcf5] border-[#00685d]/10 opacity-60'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="flex items-center gap-2">
+                        <span className="w-6 h-6 rounded-full bg-[#e5f1ea] text-[#00685d] text-[11px] font-bold flex items-center justify-center">
+                          {index + 1}
+                        </span>
+                        <span className="text-[13px] font-semibold text-[#131e1a]">服药提醒</span>
+                        <span className="text-[11px] text-[#6f7975]">24小时制 · 5分钟一档</span>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => handleToggleReminderSlot(slot.id)}
+                          className={`w-10 h-5 rounded-full p-0.5 flex items-center transition-colors cursor-pointer ${
+                            slot.enabled ? 'bg-[#00685d] justify-end' : 'bg-[#c4c7c4] justify-start'
+                          }`}
+                          aria-label={slot.enabled ? '关闭提醒' : '开启提醒'}
+                        >
+                          <div className="w-4 h-4 rounded-full bg-white shadow-xs" />
+                        </button>
+                        {reminderSlots.length > 1 && (
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveReminderSlot(slot.id)}
+                            title="删除此提醒点"
+                            className="w-7 h-7 rounded-lg text-[#ba1a1a] hover:bg-[#ffdad6] flex items-center justify-center transition-colors cursor-pointer"
+                          >
+                            <span className="material-symbols-outlined text-[16px]">close</span>
+                          </button>
+                        )}
+                      </div>
                     </div>
 
-                    <div className="flex flex-col">
-                      <div className="flex items-center gap-2">
-                        <input
-                          type="time"
-                          value={slot.time}
-                          onChange={(e) => handleUpdateReminderTime(slot.id, e.target.value)}
-                          className="text-[18px] font-extrabold text-[#131e1a] tracking-tight bg-white px-2 py-0.5 rounded-lg border border-[#00685d]/20 focus:outline-none focus:ring-1 focus:ring-[#00685d]"
-                        />
-                        <select
-                          value={slot.label}
-                          onChange={(e) => handleUpdateReminderLabel(slot.id, e.target.value)}
-                          className="px-2 py-1 rounded-md bg-[#9af3e3]/50 text-[#005047] text-[11px] font-bold border-none focus:outline-none cursor-pointer"
-                        >
-                          <option value="晨服">晨服</option>
-                          <option value="午服">午服</option>
-                          <option value="晚服">晚服</option>
-                          <option value="睡前">睡前</option>
-                          <option value="按需加服">加服</option>
-                        </select>
+                    <div className="flex items-center justify-center gap-3 py-1">
+                      <div className="flex flex-col items-center gap-1.5">
+                        <span className="text-[10px] font-semibold text-[#6f7975] tracking-wide">
+                          时
+                        </span>
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => bumpReminderPart(slot.id, 'hour', -1)}
+                            className="w-9 h-9 rounded-xl bg-[#f0fcf5] border border-[#00685d]/15 text-[#00685d] flex items-center justify-center hover:bg-[#e5f1ea] active:scale-95 transition-all cursor-pointer"
+                            aria-label="减少小时"
+                          >
+                            <span className="material-symbols-outlined text-[20px]">remove</span>
+                          </button>
+                          <span className="w-12 text-center text-[28px] leading-none font-extrabold text-[#131e1a] font-['Plus_Jakarta_Sans'] tabular-nums">
+                            {hour.padStart(2, '0')}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => bumpReminderPart(slot.id, 'hour', 1)}
+                            className="w-9 h-9 rounded-xl bg-[#f0fcf5] border border-[#00685d]/15 text-[#00685d] flex items-center justify-center hover:bg-[#e5f1ea] active:scale-95 transition-all cursor-pointer"
+                            aria-label="增加小时"
+                          >
+                            <span className="material-symbols-outlined text-[20px]">add</span>
+                          </button>
+                        </div>
                       </div>
-                      <span className="text-[11px] text-[#6f7975] mt-1">
+
+                      <span className="text-[28px] font-extrabold text-[#00685d]/40 pt-4">:</span>
+
+                      <div className="flex flex-col items-center gap-1.5">
+                        <span className="text-[10px] font-semibold text-[#6f7975] tracking-wide">
+                          分
+                        </span>
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => bumpReminderPart(slot.id, 'minute', -1)}
+                            className="w-9 h-9 rounded-xl bg-[#f0fcf5] border border-[#00685d]/15 text-[#00685d] flex items-center justify-center hover:bg-[#e5f1ea] active:scale-95 transition-all cursor-pointer"
+                            aria-label="减少分钟"
+                          >
+                            <span className="material-symbols-outlined text-[20px]">remove</span>
+                          </button>
+                          <span className="w-12 text-center text-[28px] leading-none font-extrabold text-[#131e1a] font-['Plus_Jakarta_Sans'] tabular-nums">
+                            {minute.padStart(2, '0')}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => bumpReminderPart(slot.id, 'minute', 1)}
+                            className="w-9 h-9 rounded-xl bg-[#f0fcf5] border border-[#00685d]/15 text-[#00685d] flex items-center justify-center hover:bg-[#e5f1ea] active:scale-95 transition-all cursor-pointer"
+                            aria-label="增加分钟"
+                          >
+                            <span className="material-symbols-outlined text-[20px]">add</span>
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="mt-3 flex items-center justify-between">
+                      <span className="text-[11px] text-[#6f7975]">
                         每次 {dosageText || '1片'} · {mealTiming}
                       </span>
+                      <div className="flex gap-1.5">
+                        {['08:00', '12:30', '19:00', '21:30'].map((t) => (
+                          <button
+                            key={t}
+                            type="button"
+                            onClick={() =>
+                              setReminderSlots((prev) =>
+                                prev.map((s) => (s.id === slot.id ? { ...s, time: t } : s))
+                              )
+                            }
+                            className={`px-2 py-0.5 rounded-md text-[11px] font-semibold transition-colors cursor-pointer ${
+                              slot.time === t
+                                ? 'bg-[#00685d] text-white'
+                                : 'bg-[#f0fcf5] text-[#00685d] hover:bg-[#e5f1ea]'
+                            }`}
+                          >
+                            {t}
+                          </button>
+                        ))}
+                      </div>
                     </div>
                   </div>
-
-                  <div className="flex items-center gap-2">
-                    {/* Toggle switch */}
-                    <button
-                      type="button"
-                      onClick={() => handleToggleReminderSlot(slot.id)}
-                      className={`w-11 h-6 rounded-full p-0.5 flex items-center transition-colors cursor-pointer ${
-                        slot.enabled ? 'bg-[#00685d] justify-end' : 'bg-gray-300 justify-start'
-                      }`}
-                    >
-                      <div className="w-5 h-5 rounded-full bg-white shadow-xs"></div>
-                    </button>
-
-                    {/* Delete button (if more than 1) */}
-                    {reminderSlots.length > 1 && (
-                      <button
-                        type="button"
-                        onClick={() => handleRemoveReminderSlot(slot.id)}
-                        title="删除此提醒点"
-                        className="w-7 h-7 rounded-lg text-[#ba1a1a] hover:bg-[#ffdad6] flex items-center justify-center transition-colors cursor-pointer"
-                      >
-                        <span className="material-symbols-outlined text-[16px]">close</span>
-                      </button>
-                    )}
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
 
-            {/* 添加服药提醒时间按钮 - 响应点击，追加提醒时间 */}
             <button
               type="button"
               id="add-reminder-time-btn"
@@ -646,7 +705,7 @@ export const AddMedicationView: React.FC<AddMedicationViewProps> = ({
               className="w-full py-2.5 rounded-xl bg-[#f0fcf5] hover:bg-[#e5f1ea] text-[#00685d] text-[12px] font-semibold flex items-center justify-center gap-1.5 transition-colors border border-dashed border-[#00685d]/30 cursor-pointer active:scale-98"
             >
               <span className="material-symbols-outlined text-[18px]">add_alarm</span>
-              <span>添加服药提醒时间 (如午间/晚间/睡前)</span>
+              <span>添加服药提醒时间</span>
             </button>
           </div>
 

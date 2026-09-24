@@ -147,6 +147,12 @@ export const api = {
 
   deleteMember: (id: string) => request<{ ok: boolean }>(`/members/${id}`, { method: 'DELETE' }),
 
+  uploadAvatar: async (file: File) => {
+    const form = new FormData();
+    form.append('file', file);
+    return request<{ url: string }>('/uploads/avatar', { method: 'POST', body: form });
+  },
+
   recordVitals: (
     memberId: string,
     body: { type: 'bp' | 'glucose' | 'temp' | 'heartRate' | 'sleep'; data: Record<string, unknown> }
@@ -200,6 +206,9 @@ export const api = {
       body: JSON.stringify(body),
     }),
 
+  deleteRecord: (id: string) =>
+    request<{ ok: boolean }>(`/records/${id}`, { method: 'DELETE' }),
+
   getLabReports: (memberId?: string) => {
     const q = memberId ? `?member_id=${encodeURIComponent(memberId)}` : '';
     return request<LabReport[]>(`/lab-reports${q}`);
@@ -219,6 +228,9 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(body),
     }),
+
+  deleteLabReport: (id: string) =>
+    request<{ ok: boolean }>(`/lab-reports/${id}`, { method: 'DELETE' }),
 
   downloadLabOriginal: async (reportId: string) => {
     const token = getToken();

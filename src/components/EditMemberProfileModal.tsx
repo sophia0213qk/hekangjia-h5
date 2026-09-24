@@ -1,11 +1,16 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { FamilyMember } from '../types';
+import { api } from '../api/client';
+import { DEFAULT_AVATAR, resolveAvatar } from '../utils/avatar';
+import { MemberAvatar } from './MemberAvatar';
 
 interface EditMemberProfileModalProps {
   isOpen: boolean;
   onClose: () => void;
   member: FamilyMember;
-  onSave: (updatedMember: FamilyMember) => void;
+  onSave: (updatedMember: FamilyMember) => void | Promise<void>;
+  /** Called right after avatar upload so profile refreshes without waiting for full save */
+  onAvatarChange?: (memberId: string, avatarUrl: string) => void | Promise<void>;
   onShowToast?: (msg: string) => void;
 }
 
@@ -14,6 +19,7 @@ export const EditMemberProfileModal: React.FC<EditMemberProfileModalProps> = ({
   onClose,
   member,
   onSave,
+  onAvatarChange,
   onShowToast,
 }) => {
   const [name, setName] = useState(member.name);
@@ -23,7 +29,9 @@ export const EditMemberProfileModal: React.FC<EditMemberProfileModalProps> = ({
   const [bloodType, setBloodType] = useState(member.bloodType);
   const [height, setHeight] = useState(member.height || 170);
   const [weight, setWeight] = useState(member.weight || 65);
-  const [avatar, setAvatar] = useState(member.avatar);
+  const [avatar, setAvatar] = useState(resolveAvatar(member.avatar));
+  const [uploading, setUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Conditions and Allergies
   const [conditions, setConditions] = useState<string[]>(member.chronicConditions || []);
@@ -32,6 +40,7 @@ export const EditMemberProfileModal: React.FC<EditMemberProfileModalProps> = ({
   const [newAllergyInput, setNewAllergyInput] = useState('');
 
   useEffect(() => {
+    if (!isOpen) return;
     setName(member.name);
     setNickname(member.nickname);
     setRelation(member.relation);
@@ -39,10 +48,19 @@ export const EditMemberProfileModal: React.FC<EditMemberProfileModalProps> = ({
     setBloodType(member.bloodType);
     setHeight(member.height || 170);
     setWeight(member.weight || 65);
-    setAvatar(member.avatar);
+    setAvatar(resolveAvatar(member.avatar));
     setConditions(member.chronicConditions || []);
     setAllergies(member.allergies || []);
-  }, [member, isOpen]);
+    setUploading(false);
+    // Only re-init when modal opens
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, member.id]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    // Sync avatar when parent updates it (e.g. after upload)
+    setAvatar(resolveAvatar(member.avatar));
+  }, [isOpen, member.avatar]);
 
   if (!isOpen) return null;
 
@@ -54,6 +72,37 @@ export const EditMemberProfileModal: React.FC<EditMemberProfileModalProps> = ({
     if (bmi < 24) return '正常标准';
     if (bmi < 28) return '轻微超重';
     return '肥胖预警';
+  };
+
+  const handleAvatarFile = async (file: File | null) => {
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      onShowToast?.('请选择图片文件');
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      onShowToast?.('头像过大（上限 5MB）');
+      return;
+    }
+    setUploading(true);
+    const localPreview = URL.createObjectURL(file);
+    setAvatar(localPreview);
+    try {
+      const res = await api.uploadAvatar(file);
+      const persisted = res.url;
+      const displayUrl = `${persisted}${persisted.includes('?') ? '&' : '?'}t=${Date.now()}`;
+      setAvatar(displayUrl);
+      URL.revokeObjectURL(localPreview);
+      await api.updateMember(member.id, { avatar: persisted });
+      await onAvatarChange?.(member.id, persisted);
+      onShowToast?.('头像已更新');
+    } catch (e) {
+      URL.revokeObjectURL(localPreview);
+      setAvatar(resolveAvatar(member.avatar));
+      onShowToast?.(e instanceof Error ? e.message : '头像上传失败');
+    } finally {
+      setUploading(false);
+    }
   };
 
   const presetConditions = [
@@ -133,6 +182,10 @@ export const EditMemberProfileModal: React.FC<EditMemberProfileModalProps> = ({
       return;
     }
 
+    const avatarToSave = avatar.startsWith('blob:')
+      ? resolveAvatar(member.avatar)
+      : resolveAvatar(avatar.split('?')[0]);
+
     const updatedMember: FamilyMember = {
       ...member,
       name: name.trim(),
@@ -144,7 +197,7 @@ export const EditMemberProfileModal: React.FC<EditMemberProfileModalProps> = ({
       weight: Number(weight),
       bmi: calculatedBmi,
       bmiStatus: getBmiStatus(calculatedBmi),
-      avatar,
+      avatar: avatarToSave,
       chronicConditions: conditions,
       allergies: allergies.length > 0 ? allergies : ['无已知过敏'],
     };
@@ -193,11 +246,34 @@ export const EditMemberProfileModal: React.FC<EditMemberProfileModalProps> = ({
         <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-5 space-y-4">
           {/* Member Card Preview with Avatar */}
           <div className="flex items-center gap-3.5 bg-[#f0fcf5] p-3.5 rounded-2xl border border-[#00685d]/15">
-            <img
-              src={avatar}
-              alt={name}
-              className="w-14 h-14 rounded-full object-cover ring-2 ring-[#00685d]/20 shrink-0"
-            />
+            <div className="relative shrink-0">
+              <MemberAvatar
+                src={avatar}
+                alt={name}
+                className="w-14 h-14 rounded-full object-cover ring-2 ring-[#00685d]/20"
+              />
+              <button
+                type="button"
+                disabled={uploading}
+                onClick={() => fileInputRef.current?.click()}
+                className="absolute -bottom-1 -right-1 w-7 h-7 rounded-full bg-[#00685d] text-white flex items-center justify-center shadow-md hover:bg-[#005047] disabled:opacity-60"
+                title="上传头像"
+              >
+                <span className="material-symbols-outlined text-[16px]">
+                  {uploading ? 'progress_activity' : 'photo_camera'}
+                </span>
+              </button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/jpeg,image/png,image/webp,image/gif"
+                className="hidden"
+                onChange={(e) => {
+                  void handleAvatarFile(e.target.files?.[0] || null);
+                  e.target.value = '';
+                }}
+              />
+            </div>
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2">
                 <span className="text-[16px] font-bold text-[#131e1a] truncate">
@@ -210,6 +286,34 @@ export const EditMemberProfileModal: React.FC<EditMemberProfileModalProps> = ({
               <p className="text-[11px] text-[#6f7975] mt-0.5">
                 BMI: {calculatedBmi} ({getBmiStatus(calculatedBmi)}) · 血型: {bloodType}
               </p>
+              <div className="flex items-center gap-2 mt-1.5">
+                <button
+                  type="button"
+                  disabled={uploading}
+                  onClick={() => fileInputRef.current?.click()}
+                  className="text-[11px] font-semibold text-[#00685d] hover:underline disabled:opacity-60"
+                >
+                  {uploading ? '上传中…' : '上传头像'}
+                </button>
+                {avatar !== DEFAULT_AVATAR && !avatar.startsWith('blob:') && (
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      setAvatar(DEFAULT_AVATAR);
+                      try {
+                        await api.updateMember(member.id, { avatar: DEFAULT_AVATAR });
+                        await onAvatarChange?.(member.id, DEFAULT_AVATAR);
+                        onShowToast?.('已恢复默认头像');
+                      } catch (e) {
+                        onShowToast?.(e instanceof Error ? e.message : '恢复失败');
+                      }
+                    }}
+                    className="text-[11px] text-[#6f7975] hover:underline"
+                  >
+                    恢复默认
+                  </button>
+                )}
+              </div>
             </div>
           </div>
 

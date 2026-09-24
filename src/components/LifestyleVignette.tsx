@@ -22,7 +22,7 @@ export const LifestyleVignette: React.FC = () => {
           初夏温和调养建议
         </h3>
         <p className="text-[13px] text-[#3e4946] leading-relaxed">
-          今日紫外线偏强，午后建议老人避免剧烈运动；陈睿睿可在下午4点进行户外日照补充天然VD。
+          今日紫外线偏强，午后建议减少户外暴晒；老人避免剧烈运动，儿童可在傍晚适度日照补充维生素D。
         </p>
       </div>
     </section>

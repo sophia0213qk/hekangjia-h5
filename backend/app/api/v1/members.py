@@ -37,7 +37,7 @@ def create_member(
         nickname=body.nickname or body.relation,
         relation=body.relation,
         age=body.age,
-        avatar=body.avatar,
+        avatar=(body.avatar or "").strip() or "/avatars/default.svg",
         blood_type=body.blood_type,
         height=body.height,
         weight=body.weight,

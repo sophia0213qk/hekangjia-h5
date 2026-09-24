@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { FamilyMember } from '../types';
+import { hasRecordedVitals } from '../utils/vitals';
 
 interface RecordVitalsModalProps {
   isOpen: boolean;
@@ -37,7 +38,32 @@ export const RecordVitalsModal: React.FC<RecordVitalsModalProps> = ({
   // Heart rate state
   const [heartRate, setHeartRate] = useState<number>(72);
 
+  useEffect(() => {
+    if (!isOpen) return;
+    setSelectedMemberId(initialMemberId);
+  }, [isOpen, initialMemberId]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const member = members.find((item) => item.id === selectedMemberId);
+    const bp = member?.vitals?.bloodPressure;
+    const bpRecorded =
+      !!bp && bp.status !== '待录入' && !!bp.measuredAt && bp.measuredAt !== '暂无';
+    setSystolic(bpRecorded ? bp.systolic : 122);
+    setDiastolic(bpRecorded ? bp.diastolic : 80);
+    setGlucose(member?.vitals?.bloodSugar?.value ?? 5.6);
+    const timing = member?.vitals?.bloodSugar?.timing || '空腹';
+    setGlucoseTiming(
+      timing === '餐后2小时' || timing === '睡前' || timing === '空腹' ? timing : '空腹'
+    );
+    setTemperature(member?.vitals?.temperature?.value ?? 36.6);
+    setHeartRate(member?.vitals?.heartRate?.value ?? 72);
+  }, [isOpen, selectedMemberId, members]);
+
   if (!isOpen) return null;
+
+  const selectedMember = members.find((item) => item.id === selectedMemberId);
+  const editingExisting = hasRecordedVitals(selectedMember);
 
   const handleSave = () => {
     let data: any = {};
@@ -64,7 +90,9 @@ export const RecordVitalsModal: React.FC<RecordVitalsModalProps> = ({
             <span className="material-symbols-outlined text-[#00685d] text-[22px]">
               add_chart
             </span>
-            <h3 className="text-[17px] font-bold text-[#131e1a]">记录家庭体征</h3>
+            <h3 className="text-[17px] font-bold text-[#131e1a]">
+              {editingExisting ? '修改体征' : '录入体征'}
+            </h3>
           </div>
           <button
             onClick={onClose}
@@ -285,7 +313,7 @@ export const RecordVitalsModal: React.FC<RecordVitalsModalProps> = ({
             onClick={handleSave}
             className="flex-1 py-3 rounded-xl bg-[#00685d] hover:bg-[#005047] text-white font-bold text-[14px] shadow-md active:scale-95 transition-all"
           >
-            保存并同步
+            {editingExisting ? '保存修改' : '保存录入'}
           </button>
         </div>
       </div>

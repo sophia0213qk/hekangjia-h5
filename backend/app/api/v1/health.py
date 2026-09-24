@@ -60,6 +60,23 @@ def create_record(
     return record_to_out(row)
 
 
+@router.delete("/records/{record_id}")
+def delete_record(
+    record_id: str,
+    user: models.User = Depends(require_family),
+    db: Session = Depends(get_db),
+):
+    row = db.get(models.MedicalRecord, parse_uuid(record_id))
+    if not row:
+        raise HTTPException(status_code=404, detail="就诊记录不存在")
+    member = db.get(models.Member, row.member_id)
+    if not member or member.family_id != user.family_id:
+        raise HTTPException(status_code=404, detail="就诊记录不存在")
+    db.delete(row)
+    db.commit()
+    return {"ok": True}
+
+
 @router.get("/lab-reports")
 def list_lab_reports(
     member_id: str | None = Query(None),
@@ -119,6 +136,23 @@ def create_lab_report(
     db.commit()
     db.refresh(row)
     return lab_to_out(row)
+
+
+@router.delete("/lab-reports/{report_id}")
+def delete_lab_report(
+    report_id: str,
+    user: models.User = Depends(require_family),
+    db: Session = Depends(get_db),
+):
+    row = db.get(models.LabReport, parse_uuid(report_id))
+    if not row:
+        raise HTTPException(status_code=404, detail="化验单不存在")
+    member = db.get(models.Member, row.member_id)
+    if not member or member.family_id != user.family_id:
+        raise HTTPException(status_code=404, detail="化验单不存在")
+    db.delete(row)
+    db.commit()
+    return {"ok": True}
 
 
 @router.get("/lab-reports/{report_id}/original")

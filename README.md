@@ -18,7 +18,7 @@ docker compose up -d
 cd backend
 python -m venv .venv
 .venv\Scripts\activate          # Windows
-pip install -r requirements.txt
+pip install -r requirements.txt 
 copy .env.example .env          # 填写 ZHIPU_API_KEY（可选）
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```

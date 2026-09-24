@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from app.api.v1 import ai, auth, health, medications, members
+from app.api.v1 import ai, auth, health, medications, members, uploads
 
 api_router = APIRouter(prefix="/api/v1")
 api_router.include_router(auth.router)
@@ -8,3 +8,4 @@ api_router.include_router(members.router)
 api_router.include_router(medications.router)
 api_router.include_router(health.router)
 api_router.include_router(ai.router)
+api_router.include_router(uploads.router)

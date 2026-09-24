@@ -8,6 +8,8 @@ interface RecordsTimelineViewProps {
   onSelectReport: (report: LabReport) => void;
   onAddRecord: () => void;
   onUploadReport?: (memberId?: string) => void;
+  onDeleteReport?: (id: string) => void;
+  onDeleteRecord?: (id: string) => void;
 }
 
 export const RecordsTimelineView: React.FC<RecordsTimelineViewProps> = ({
@@ -17,9 +19,14 @@ export const RecordsTimelineView: React.FC<RecordsTimelineViewProps> = ({
   onSelectReport,
   onAddRecord,
   onUploadReport,
+  onDeleteReport,
+  onDeleteRecord,
 }) => {
   const [filterMemberId, setFilterMemberId] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
+  const [confirmDelete, setConfirmDelete] = useState<
+    { type: 'report' | 'record'; id: string; title: string } | null
+  >(null);
 
   const filteredRecords = records.filter((r) => {
     const matchMember = filterMemberId === 'all' || r.memberId === filterMemberId;
@@ -160,10 +167,10 @@ export const RecordsTimelineView: React.FC<RecordsTimelineViewProps> = ({
                 onClick={() => onSelectReport(rep)}
                 role="button"
                 tabIndex={0}
-                className="p-3 rounded-2xl bg-[#f8f9ff] border border-[#00685d]/10 shadow-xs hover:border-[#00685d]/30 hover:bg-white transition-all cursor-pointer flex flex-col justify-between space-y-2 group"
+                className="p-3 rounded-2xl bg-[#f8f9ff] border border-[#00685d]/10 shadow-xs hover:border-[#00685d]/30 hover:bg-white transition-all cursor-pointer flex flex-col justify-between space-y-2 group relative"
               >
                 <div>
-                  <div className="flex items-center justify-between mb-1.5">
+                  <div className="flex items-center justify-between mb-1.5 gap-1">
                     <span
                       className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${
                         rep.statusType === 'success'
@@ -173,7 +180,22 @@ export const RecordsTimelineView: React.FC<RecordsTimelineViewProps> = ({
                     >
                       {rep.statusTag}
                     </span>
-                    <span className="text-[10px] text-[#6f7975]">{rep.date}</span>
+                    <div className="flex items-center gap-1 shrink-0">
+                      <span className="text-[10px] text-[#6f7975]">{rep.date}</span>
+                      {onDeleteReport && (
+                        <button
+                          type="button"
+                          title="删除化验单"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setConfirmDelete({ type: 'report', id: rep.id, title: rep.title });
+                          }}
+                          className="w-6 h-6 rounded-full flex items-center justify-center text-[#a7391e]/80 hover:bg-[#ffdad2] hover:text-[#a7391e] transition"
+                        >
+                          <span className="material-symbols-outlined text-[16px]">delete</span>
+                        </button>
+                      )}
+                    </div>
                   </div>
                   <h4 className="text-[13px] font-bold text-[#131e1a] group-hover:text-[#00685d] transition-colors leading-snug line-clamp-2">
                     {rep.title}
@@ -221,16 +243,34 @@ export const RecordsTimelineView: React.FC<RecordsTimelineViewProps> = ({
                   key={rec.id}
                   className="p-4 rounded-2xl bg-[#f8f9ff] border border-[#00685d]/10 shadow-xs space-y-2.5 relative overflow-hidden"
                 >
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <span className="px-2 py-0.5 rounded-full bg-[#e5eeff] text-[#005047] text-[11px] font-bold">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className="px-2 py-0.5 rounded-full bg-[#e5eeff] text-[#005047] text-[11px] font-bold shrink-0">
                         {mem?.nickname || '家人'}
                       </span>
-                      <h4 className="text-[15px] font-bold text-[#131e1a]">{rec.hospital}</h4>
+                      <h4 className="text-[15px] font-bold text-[#131e1a] truncate">{rec.hospital}</h4>
                     </div>
-                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-[#9af3e3]/50 text-[#005047] font-bold">
-                      {rec.status}
-                    </span>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-[#9af3e3]/50 text-[#005047] font-bold">
+                        {rec.status}
+                      </span>
+                      {onDeleteRecord && (
+                        <button
+                          type="button"
+                          title="删除就诊记录"
+                          onClick={() =>
+                            setConfirmDelete({
+                              type: 'record',
+                              id: rec.id,
+                              title: `${rec.hospital} · ${rec.department}`,
+                            })
+                          }
+                          className="w-7 h-7 rounded-full flex items-center justify-center text-[#a7391e]/80 hover:bg-[#ffdad2] hover:text-[#a7391e] transition"
+                        >
+                          <span className="material-symbols-outlined text-[17px]">delete</span>
+                        </button>
+                      )}
+                    </div>
                   </div>
 
                   <div className="flex items-center gap-3 text-[11px] text-[#6f7975]">
@@ -257,6 +297,42 @@ export const RecordsTimelineView: React.FC<RecordsTimelineViewProps> = ({
           </div>
         </section>
       </div>
+
+      {confirmDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+          <div className="w-full max-w-sm bg-white rounded-2xl p-5 shadow-2xl border border-[#00685d]/10 space-y-4">
+            <div className="flex items-start gap-3">
+              <span className="material-symbols-outlined text-[#a7391e] text-[28px]">warning</span>
+              <div>
+                <h4 className="text-[15px] font-bold text-[#131e1a]">确认删除？</h4>
+                <p className="text-[12px] text-[#6f7975] mt-1 leading-relaxed">
+                  将删除「{confirmDelete.title}」，删除后不可恢复。
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setConfirmDelete(null)}
+                className="flex-1 py-2.5 rounded-xl bg-[#f0fcf5] text-[#3e4946] text-[13px] font-semibold"
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (confirmDelete.type === 'report') onDeleteReport?.(confirmDelete.id);
+                  else onDeleteRecord?.(confirmDelete.id);
+                  setConfirmDelete(null);
+                }}
+                className="flex-1 py-2.5 rounded-xl bg-[#a7391e] hover:bg-[#8c2f18] text-white text-[13px] font-bold"
+              >
+                确认删除
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

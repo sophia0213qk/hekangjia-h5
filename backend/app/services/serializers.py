@@ -28,13 +28,14 @@ def calc_bmi(height_cm: float, weight_kg: float) -> tuple[float, str]:
 def member_to_out(m: models.Member, pending_todos: int = 0) -> dict:
     bmi, bmi_status = calc_bmi(m.height or 0, m.weight or 0)
     vitals = m.latest_vitals or {}
+    avatar = (m.avatar or "").strip() or "/avatars/default.svg"
     return {
         "id": str(m.id),
         "name": m.name,
         "nickname": m.nickname or m.relation,
         "relation": m.relation,
         "age": m.age,
-        "avatar": m.avatar,
+        "avatar": avatar,
         "statusText": m.status_text,
         "statusType": m.status_type,
         "pendingTodos": pending_todos,

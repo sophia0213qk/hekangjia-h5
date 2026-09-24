@@ -3,6 +3,8 @@ import { FamilyMember, Medication, MedicalRecord, LabReport } from '../types';
 import { APP_ICONS } from '../data/mockData';
 import { EditMemberProfileModal } from './EditMemberProfileModal';
 import { EditMedicationModal } from './EditMedicationModal';
+import { MemberAvatar } from './MemberAvatar';
+import { hasRecordedVitals } from '../utils/vitals';
 
 interface MemberProfileViewProps {
   member: FamilyMember;
@@ -18,6 +20,7 @@ interface MemberProfileViewProps {
   onUploadReport?: () => void;
   onAddMedication?: () => void;
   onUpdateMember?: (updatedMember: FamilyMember) => void;
+  onAvatarChange?: (memberId: string, avatarUrl: string) => void;
   onUpdateMedication?: (updatedMedication: Medication) => void;
   onDeleteMedication?: (medicationId: string) => void;
   onShowToast?: (msg: string) => void;
@@ -37,6 +40,7 @@ export const MemberProfileView: React.FC<MemberProfileViewProps> = ({
   onUploadReport,
   onAddMedication,
   onUpdateMember,
+  onAvatarChange,
   onUpdateMedication,
   onDeleteMedication,
   onShowToast,
@@ -44,14 +48,24 @@ export const MemberProfileView: React.FC<MemberProfileViewProps> = ({
   const [selectedWeekDay, setSelectedWeekDay] = useState<number>(6);
   const [isEditProfileOpen, setIsEditProfileOpen] = useState<boolean>(false);
   const [editingMedication, setEditingMedication] = useState<Medication | null>(null);
+  const [confirmDeleteMedId, setConfirmDeleteMedId] = useState<string | null>(null);
 
   // Filter records and medications for this member
   const memberMeds = medications.filter((m) => m.memberId === member.id);
   const memberRecords = records.filter((r) => r.memberId === member.id);
   const memberReports = labReports.filter((l) => l.memberId === member.id);
 
-  const bpHistory = member.vitals.bloodPressure.history || [134, 130, 128, 129, 126, 128, 124];
+  const hasVitals = hasRecordedVitals(member);
+  const bp = member.vitals?.bloodPressure;
+  const hasBp =
+    !!bp &&
+    bp.status !== '待录入' &&
+    !!bp.measuredAt &&
+    bp.measuredAt !== '暂无';
+  const bpHistory = hasBp ? bp.history || [] : [];
   const days = ['周一', '周二', '周三', '周四', '周五', '周六', '今日'];
+  const sugar = member.vitals?.bloodSugar;
+  const heart = member.vitals?.heartRate;
 
   return (
     <div className="min-h-screen bg-[#f0fcf5] text-[#131e1a] pb-28">
@@ -103,7 +117,7 @@ export const MemberProfileView: React.FC<MemberProfileViewProps> = ({
           <div className="flex items-start justify-between">
             <div className="flex items-center gap-3">
               <div className="relative">
-                <img
+                <MemberAvatar
                   src={member.avatar}
                   alt={member.name}
                   className="w-16 h-16 rounded-full object-cover ring-2 ring-[#00685d]/20 shadow-xs"
@@ -190,19 +204,41 @@ export const MemberProfileView: React.FC<MemberProfileViewProps> = ({
           </div>
         </section>
 
-        {/* 2. 健康数据速览 (今晨已自动校准) */}
+        {/* 2. 健康数据速览 */}
         <section className="bg-white rounded-2xl p-4 shadow-sm border border-[#00685d]/10 space-y-3.5">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2 min-w-0">
               <span className="material-symbols-outlined text-[#00685d] text-[20px]">
                 show_chart
               </span>
               <h3 className="text-[16px] font-bold text-[#131e1a]">健康数据速览</h3>
             </div>
-            <span className="text-[11px] text-[#6f7975]">今晨已自动校准</span>
+            <button
+              id="profile-vitals-action"
+              type="button"
+              onClick={() => onRecordVitals(member.id)}
+              className="shrink-0 text-[12px] text-[#00685d] bg-[#f0fcf5] hover:bg-[#e5f1ea] px-3 py-1.5 rounded-full font-semibold flex items-center gap-1 border border-[#00685d]/10 transition-colors cursor-pointer active:scale-95"
+            >
+              <span className="material-symbols-outlined text-[14px]">
+                {hasVitals ? 'edit' : 'add_chart'}
+              </span>
+              <span>{hasVitals ? '修改体征' : '录入体征'}</span>
+            </button>
           </div>
 
-          {/* Blood Pressure Level & 7-day Morning Trend */}
+          {!hasVitals && (
+            <div className="rounded-xl border border-dashed border-[#00685d]/25 bg-[#f8f9ff] px-4 py-8 text-center space-y-1.5">
+              <span className="material-symbols-outlined text-[#00685d] text-[28px]">monitor_heart</span>
+              <p className="text-[14px] font-semibold text-[#131e1a]">还没有体征数据</p>
+              <p className="text-[12px] text-[#6f7975] leading-relaxed">
+                第一次请先录入血压、血糖或心率，保存后可以在这里查看，之后也能修改。
+              </p>
+            </div>
+          )}
+
+          {hasVitals && (
+          <>
+          {hasBp && bp && (
           <div className="p-3.5 rounded-xl bg-[#f8f9ff] border border-[#00685d]/10 space-y-2.5">
             <div className="flex items-center justify-between">
               <span className="text-[12px] text-[#6f7975] font-medium">
@@ -210,13 +246,13 @@ export const MemberProfileView: React.FC<MemberProfileViewProps> = ({
               </span>
               <span className="px-2 py-0.5 rounded-full bg-[#9af3e3]/60 text-[#005047] text-[11px] font-bold flex items-center gap-1">
                 <span className="w-1.5 h-1.5 rounded-full bg-[#00685d]"></span>
-                正常安稳
+                {bp.status || '已记录'}
               </span>
             </div>
 
             <div className="flex items-baseline gap-1.5">
               <span className="text-[32px] font-extrabold text-[#131e1a] tracking-tight font-['Plus_Jakarta_Sans']">
-                {member.vitals.bloodPressure.systolic} / {member.vitals.bloodPressure.diastolic}
+                {bp.systolic} / {bp.diastolic}
               </span>
               <span className="text-[12px] text-[#6f7975]">毫米汞柱</span>
             </div>
@@ -265,7 +301,9 @@ export const MemberProfileView: React.FC<MemberProfileViewProps> = ({
                     { cx: 195, cy: 24, val: bpHistory[4] },
                     { cx: 245, cy: 26, val: bpHistory[5] },
                     { cx: 290, cy: 32, val: bpHistory[6] },
-                  ].map((pt, i) => (
+                  ]
+                    .filter((pt) => pt.val != null)
+                    .map((pt, i) => (
                     <g key={i} className="cursor-pointer" onClick={() => setSelectedWeekDay(i)}>
                       <circle
                         cx={pt.cx}
@@ -298,30 +336,34 @@ export const MemberProfileView: React.FC<MemberProfileViewProps> = ({
               </div>
             </div>
           </div>
+          )}
 
-          {/* 2 Mini Cards: Blood Sugar & Heart Rate */}
+          {(sugar || heart) && (
           <div className="grid grid-cols-2 gap-3">
+            {sugar && (
             <div className="p-3 rounded-xl bg-[#f8f9ff] border border-[#00685d]/10 space-y-1">
               <div className="flex items-center justify-between text-[11px] text-[#6f7975]">
                 <div className="flex items-center gap-1">
                   <span className="material-symbols-outlined text-[#904800] text-[15px]">
                     opacity
                   </span>
-                  <span>空腹血糖</span>
+                  <span>{sugar.timing?.includes('餐后') ? '餐后血糖' : '空腹血糖'}</span>
                 </div>
                 <span className="w-1.5 h-1.5 rounded-full bg-[#00685d]"></span>
               </div>
               <div className="flex items-baseline gap-1">
                 <span className="text-[22px] font-extrabold text-[#131e1a]">
-                  {member.vitals.bloodSugar?.value || 5.8}
+                  {sugar.value}
                 </span>
                 <span className="text-[10px] text-[#6f7975]">毫摩尔/升</span>
               </div>
               <span className="text-[10px] text-[#00685d] font-semibold block">
-                {member.vitals.bloodSugar?.status || '达标 · 餐前正常'}
+                {sugar.status || '已记录'}
               </span>
             </div>
+            )}
 
+            {heart && (
             <div className="p-3 rounded-xl bg-[#f8f9ff] border border-[#00685d]/10 space-y-1">
               <div className="flex items-center justify-between text-[11px] text-[#6f7975]">
                 <div className="flex items-center gap-1">
@@ -334,15 +376,19 @@ export const MemberProfileView: React.FC<MemberProfileViewProps> = ({
               </div>
               <div className="flex items-baseline gap-1">
                 <span className="text-[22px] font-extrabold text-[#131e1a]">
-                  {member.vitals.heartRate?.value || 72}
+                  {heart.value}
                 </span>
                 <span className="text-[10px] text-[#6f7975]">次/分</span>
               </div>
               <span className="text-[10px] text-[#00685d] font-semibold block">
-                {member.vitals.heartRate?.status || '节律规整 · 平稳'}
+                {heart.status || '已记录'}
               </span>
             </div>
+            )}
           </div>
+          )}
+          </>
+          )}
         </section>
 
         {/* 3. 当前服用药物 */}
@@ -354,7 +400,7 @@ export const MemberProfileView: React.FC<MemberProfileViewProps> = ({
             </div>
             <span className="text-[11px] text-[#6f7975] flex items-center gap-0.5">
               <span className="material-symbols-outlined text-[13px] text-[#00685d]">touch_app</span>
-              点击药物修改提醒与用量
+              点击修改 · 可删除
             </span>
           </div>
 
@@ -368,20 +414,35 @@ export const MemberProfileView: React.FC<MemberProfileViewProps> = ({
                   tabIndex={0}
                   className="p-3.5 rounded-xl bg-[#f8f9ff] border border-[#00685d]/10 hover:border-[#00685d]/40 hover:bg-[#f0fcf5]/60 transition-all cursor-pointer flex flex-col space-y-2 group shadow-2xs active:scale-[0.99]"
                 >
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <span className="text-[14px] font-bold text-[#131e1a] group-hover:text-[#00685d] transition-colors">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className="text-[14px] font-bold text-[#131e1a] group-hover:text-[#00685d] transition-colors truncate">
                         {med.name}
                       </span>
-                      <span className="px-2 py-0.5 rounded-full bg-[#9af3e3]/50 text-[#005047] text-[10px] font-bold">
+                      <span className="px-2 py-0.5 rounded-full bg-[#9af3e3]/50 text-[#005047] text-[10px] font-bold shrink-0">
                         正在服用
                       </span>
                     </div>
 
-                    <span className="text-[11px] text-[#00685d] font-semibold flex items-center gap-0.5 opacity-90 group-hover:opacity-100 group-hover:translate-x-0.5 transition-all">
-                      <span className="material-symbols-outlined text-[13px]">edit_calendar</span>
-                      <span>修改提醒</span>
-                    </span>
+                    <div className="flex items-center gap-1 shrink-0">
+                      <span className="text-[11px] text-[#00685d] font-semibold flex items-center gap-0.5 opacity-90">
+                        <span className="material-symbols-outlined text-[13px]">edit_calendar</span>
+                        <span>修改</span>
+                      </span>
+                      {onDeleteMedication && (
+                        <button
+                          type="button"
+                          title="删除药物"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setConfirmDeleteMedId(med.id);
+                          }}
+                          className="w-7 h-7 rounded-full flex items-center justify-center text-[#a7391e]/80 hover:bg-[#ffdad2] hover:text-[#a7391e] transition"
+                        >
+                          <span className="material-symbols-outlined text-[17px]">delete</span>
+                        </button>
+                      )}
+                    </div>
                   </div>
 
                   <div className="flex items-center gap-3 text-[11px] text-[#6f7975] flex-wrap">
@@ -415,6 +476,41 @@ export const MemberProfileView: React.FC<MemberProfileViewProps> = ({
         </section>
       </div>
 
+      {confirmDeleteMedId && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+          <div className="w-full max-w-sm bg-white rounded-2xl p-5 shadow-2xl border border-[#00685d]/10 space-y-4">
+            <div className="flex items-start gap-3">
+              <span className="material-symbols-outlined text-[#a7391e] text-[28px]">warning</span>
+              <div>
+                <h4 className="text-[15px] font-bold text-[#131e1a]">确认删除药物？</h4>
+                <p className="text-[12px] text-[#6f7975] mt-1">
+                  将移出「{memberMeds.find((m) => m.id === confirmDeleteMedId)?.name || '该药物'}」，删除后不可恢复。
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setConfirmDeleteMedId(null)}
+                className="flex-1 py-2.5 rounded-xl bg-[#f0fcf5] text-[#3e4946] text-[13px] font-semibold"
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  onDeleteMedication?.(confirmDeleteMedId);
+                  setConfirmDeleteMedId(null);
+                }}
+                className="flex-1 py-2.5 rounded-xl bg-[#a7391e] hover:bg-[#8c2f18] text-white text-[13px] font-bold"
+              >
+                确认删除
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Floating Action Bottom Bar */}
       <div className="fixed bottom-0 inset-x-0 z-30 bg-white/95 backdrop-blur-md border-t border-[#00685d]/10 px-4 py-2.5 shadow-lg">
         <div className="max-w-2xl mx-auto flex items-center gap-3">
@@ -430,8 +526,10 @@ export const MemberProfileView: React.FC<MemberProfileViewProps> = ({
             onClick={() => onRecordVitals(member.id)}
             className="flex-1 h-12 rounded-xl bg-[#00685d] hover:bg-[#005047] text-white text-[14px] font-bold flex items-center justify-center gap-1.5 shadow-md active:scale-95 transition-all"
           >
-            <span className="material-symbols-outlined text-[18px]">add_circle</span>
-            <span>记录体征</span>
+            <span className="material-symbols-outlined text-[18px]">
+              {hasVitals ? 'edit' : 'add_circle'}
+            </span>
+            <span>{hasVitals ? '修改体征' : '录入体征'}</span>
           </button>
         </div>
       </div>
@@ -444,6 +542,7 @@ export const MemberProfileView: React.FC<MemberProfileViewProps> = ({
         onSave={(updatedMem) => {
           if (onUpdateMember) onUpdateMember(updatedMem);
         }}
+        onAvatarChange={onAvatarChange}
         onShowToast={onShowToast}
       />
 

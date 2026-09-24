@@ -3,7 +3,6 @@ import { FamilyMember, Medication, MedicalRecord, LabReport, MedicalSchedule } f
 import { Header } from './components/Header';
 import { BottomNav } from './components/BottomNav';
 import { MemberSwitcher } from './components/MemberSwitcher';
-import { CareReminderBanner } from './components/CareReminderBanner';
 import { MedicationChecklist } from './components/MedicationChecklist';
 import { VitalsGrid } from './components/VitalsGrid';
 import { LifestyleVignette } from './components/LifestyleVignette';
@@ -29,6 +28,7 @@ import {
   getStoredUser,
   getToken,
 } from './api/client';
+import { resolveAvatar } from './utils/avatar';
 
 function emptyVitals(): FamilyMember['vitals'] {
   return {
@@ -46,6 +46,7 @@ function emptyVitals(): FamilyMember['vitals'] {
 function normalizeMember(m: FamilyMember): FamilyMember {
   return {
     ...m,
+    avatar: resolveAvatar(m.avatar),
     allergies: m.allergies || [],
     chronicConditions: m.chronicConditions || [],
     vitals: m.vitals?.bloodPressure ? m.vitals : { ...emptyVitals(), ...(m.vitals || {}) },
@@ -292,7 +293,7 @@ export default function App() {
       setMembers((prev) =>
         prev.map((m) => (m.id === memberId ? normalizeMember(updated) : m))
       );
-      showToast('体征数据已成功记录并校准');
+      showToast('体征数据已保存');
     } catch (e) {
       showToast(e instanceof Error ? e.message : '录入失败');
     }
@@ -346,6 +347,12 @@ export default function App() {
     }
   };
 
+  const handleMemberAvatarChange = (memberId: string, avatarUrl: string) => {
+    setMembers((prev) =>
+      prev.map((m) => (m.id === memberId ? { ...m, avatar: resolveAvatar(avatarUrl) } : m))
+    );
+  };
+
   const handleUpdateMedication = async (updatedMed: Medication) => {
     try {
       const saved = await api.updateMedication(updatedMed.id, {
@@ -377,6 +384,27 @@ export default function App() {
       await api.deleteMedication(medId);
       setMedications((prev) => prev.filter((m) => m.id !== medId));
       showToast('已停用并移出该药物');
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : '删除失败');
+    }
+  };
+
+  const handleDeleteRecord = async (id: string) => {
+    try {
+      await api.deleteRecord(id);
+      setRecords((prev) => prev.filter((r) => r.id !== id));
+      showToast('已删除就诊记录');
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : '删除失败');
+    }
+  };
+
+  const handleDeleteLabReport = async (id: string) => {
+    try {
+      await api.deleteLabReport(id);
+      setLabReports((prev) => prev.filter((r) => r.id !== id));
+      setSelectedLabReport((prev) => (prev?.id === id ? null : prev));
+      showToast('已删除化验单');
     } catch (e) {
       showToast(e instanceof Error ? e.message : '删除失败');
     }
@@ -595,12 +623,11 @@ export default function App() {
             onAddMember={() => setIsAddMemberOpen(true)}
           />
 
-          <CareReminderBanner onRemindFather={handleRemindFather} />
-
           <MedicationChecklist
             medications={displayedMedications}
             onToggleTaken={handleToggleMedTaken}
             onAddNewMed={() => setCurrentTab('medication')}
+            onDelete={handleDeleteMedication}
           />
 
           <VitalsGrid
@@ -627,7 +654,6 @@ export default function App() {
           />
 
           <QuickActionDrawer
-            onRecordVitals={() => setIsRecordVitalsOpen(true)}
             onAddMedication={() => setCurrentTab('medication')}
             onScanReport={() => setIsScanOpen(true)}
           />
@@ -675,6 +701,7 @@ export default function App() {
           onUploadReport={() => handleOpenUploadReport(activeProfileMember.id)}
           onAddMedication={() => setCurrentTab('medication')}
           onUpdateMember={handleUpdateMember}
+          onAvatarChange={handleMemberAvatarChange}
           onUpdateMedication={handleUpdateMedication}
           onDeleteMedication={handleDeleteMedication}
           onShowToast={showToast}
@@ -702,20 +729,20 @@ export default function App() {
               onSelectReport={(rep) => setSelectedLabReport(rep)}
               onAddRecord={() => setIsAddRecordOpen(true)}
               onUploadReport={(memberId) => handleOpenUploadReport(memberId)}
+              onDeleteReport={handleDeleteLabReport}
+              onDeleteRecord={handleDeleteRecord}
             />
           </div>
         </div>
       )}
 
-      {currentTab !== 'medication' && (
-        <BottomNav
-          currentTab={currentTab}
-          onChangeTab={(tab) => {
-            setCurrentTab(tab);
-            window.scrollTo({ top: 0, behavior: 'smooth' });
-          }}
-        />
-      )}
+      <BottomNav
+        currentTab={currentTab}
+        onChangeTab={(tab) => {
+          setCurrentTab(tab);
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+        }}
+      />
 
       <RecordVitalsModal
         isOpen={isRecordVitalsOpen}
